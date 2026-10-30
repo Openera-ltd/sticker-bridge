@@ -19,12 +19,18 @@
 -dontwarn org.bouncycastle.**
 -dontwarn org.openjsse.**
 
+# Kotlin coroutines find Android's main thread through META-INF/services files that name these
+# classes. Renaming them breaks the lookup and the app crashes on launch (1.0.5).
+-keepnames class kotlinx.coroutines.internal.MainDispatcherFactory
+-keepnames class kotlinx.coroutines.CoroutineExceptionHandler
+-keep class kotlinx.coroutines.android.AndroidDispatcherFactory { <init>(); }
+-keep class kotlinx.coroutines.android.AndroidExceptionPreHandler { <init>(); }
+
 # Release hardening: scrambled names, everything moved into one short package, aggressive optimisation.
 # Line numbers stay; the mapping file (build/outputs/mapping/liveRelease/mapping.txt) is kept privately
 # to decode Sentry crash reports.
 -repackageclasses 'o'
 -allowaccessmodification
--overloadaggressively
 -keepattributes LineNumberTable
 -renamesourcefileattribute s
 
