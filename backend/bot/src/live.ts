@@ -122,8 +122,10 @@ export class LiveInbox {
     this.botId = botIdFromCookies(cookies);
     this.browser = await puppeteer.launch({ executablePath: this.cfg.chromePath, headless: true, args: CHROME_ARGS, protocolTimeout: 300_000 });
     this.browserStartedAt = Date.now();
-    this.browser.on("disconnected", () => {
-      if (this.status === "live" || this.status === "loading") this.fail("browser closed");
+    const browser = this.browser;
+    browser.on("disconnected", () => {
+      // Only this browser's own crash counts: an old one closing late must not restart the new one.
+      if (this.browser === browser && (this.status === "live" || this.status === "loading")) this.fail("browser closed");
     });
     const page = (this.page = (await this.browser.pages())[0] ?? (await this.browser.newPage()));
     await page.setViewport({ width: 1024, height: 700 });
@@ -160,7 +162,7 @@ export class LiveInbox {
     });
 
     // Watch memory from the start: the first load is the heaviest moment.
-    this.timers.push(setInterval(() => void this.watchMemory(), 20_000));
+    this.timers.push(setInterval(() => void this.watchMemory(), 10_000));
     this.log("loading tiktok messages (one tab, images/media blocked)…");
     await page.goto(this.cfg.inboxUrl, { waitUntil: "domcontentloaded", timeout: this.cfg.loadTimeoutMs });
     // On a slow CPU the chat list can take ages to draw while message data already flows.
@@ -261,7 +263,7 @@ export class LiveInbox {
     }
   }
 
-  /** Every 20 s: keep Chrome well under Render's memory limit. */
+  /** Every 10 s: keep Chrome well under Render's memory limit. */
   memMB: number | null = null;
   memPeakMB = 0;
   private trimming = false;
