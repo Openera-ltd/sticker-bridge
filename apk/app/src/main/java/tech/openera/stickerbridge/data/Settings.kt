@@ -31,7 +31,7 @@ data class AppSettings(
 ) {
     companion object {
         const val DEFAULT_PACK_NAME = "My TikTok Stickers"
-        val INTERVALS = listOf(1, 5, 15, 30, 60, 180)
+        val INTERVALS = listOf(15)
     }
 }
 

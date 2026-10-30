@@ -111,8 +111,6 @@ fun SettingsTab(
             Group {
                 SwitchRow("Sync automatically", null, s.autoSync) { v -> onChange { it.copy(autoSync = v) } }
                 Divider()
-                NavRow("Check every", intervalLabel(s.syncIntervalMin), enabled = s.autoSync) { dialog = Dialog.Interval }
-                Divider()
                 SwitchRow("Wi-Fi only", null, s.wifiOnly, enabled = s.autoSync) { v -> onChange { it.copy(wifiOnly = v) } }
                 Divider()
                 SwitchRow("Notify me", null, s.notifyNewStickers) { v ->

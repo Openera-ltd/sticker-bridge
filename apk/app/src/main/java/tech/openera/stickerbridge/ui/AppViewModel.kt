@@ -125,11 +125,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { syncNowInternal() }
     }
 
-    /** While the app is open: check quietly every few seconds so new stickers appear right away. */
-    suspend fun watchWhileOpen() {
-        while (true) {
-            kotlinx.coroutines.delay(15_000)
-            if (session.value?.connected == true) syncNowInternal(quiet = true)
+    /** Starts the silent 15-second background check (the app is in front, so Android allows it). */
+    fun ensureBackgroundSync() {
+        viewModelScope.launch {
+            SyncScheduler.apply(getApplication(), g.settings.current(), g.settings.currentSession().connected)
         }
     }
 

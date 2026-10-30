@@ -150,11 +150,8 @@ private fun Home(vm: AppViewModel, startTab: String?) {
         vm.refreshWhatsApp()
         vm.syncNow()
     }
-    // Quiet checks every 15 s, only while the app is on screen.
-    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(lifecycle) {
-        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) { vm.watchWhileOpen() }
-    }
+    // The silent 15-second check (SyncService) runs whenever the app is set to sync.
+    LaunchedEffect(Unit) { vm.ensureBackgroundSync() }
     LaunchedEffect(packs) { vm.refreshWhatsApp() }
 
     // Report sync errors once.

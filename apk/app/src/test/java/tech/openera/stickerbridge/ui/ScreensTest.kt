@@ -109,9 +109,6 @@ class ScreensTest {
         rule.onNodeWithText("@mia").assertIsDisplayed()
         rule.onNodeWithText("Wi-Fi only").performScrollTo().performClick()
         assertTrue(s.wifiOnly)
-        rule.onNodeWithText("Check every").performScrollTo().performClick()
-        rule.onNodeWithText("1 hour").performClick()
-        assertEquals(60, s.syncIntervalMin)
         rule.onNodeWithText("Dark").performScrollTo().performClick()
         assertEquals(ThemeMode.Dark, s.theme)
     }

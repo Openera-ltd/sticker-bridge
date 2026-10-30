@@ -7,6 +7,9 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- In-app updates: lets the app hand a new version to Android's installer. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Silent 15-second background check for new stickers. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <!-- Android 11+ needs these to see WhatsApp and TikTok. -->
     <queries>
@@ -48,6 +51,15 @@
         <receiver
             android:name=".update.InstallResultReceiver"
             android:exported="false" />
+
+        <service
+            android:name=".sync.SyncService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Checks every 15 seconds for stickers the user sent on TikTok and adds them to WhatsApp" />
+        </service>
 
         <!-- Sentry: what breaks and how fast the app is. No personal data, no screenshots. -->
         <meta-data android:name="io.sentry.dsn" android:value="${sentryDsn}" />
