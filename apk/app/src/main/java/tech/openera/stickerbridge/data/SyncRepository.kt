@@ -86,12 +86,14 @@ class SyncRepository(
         val safeId = item.id.filter { it.isLetterOrDigit() || it == '-' || it == '_' }.take(64)
         if (safeId.isEmpty()) return null
         val emojis = item.emojis.take(3).ifEmpty { listOf(defaultEmoji) }
-        return if (item.animated || kind == StickerProcessor.Kind.AnimatedWebp) {
-            // The server converts animated stickers; we only accept files WhatsApp will take.
-            if (!StickerProcessor.isValidAnimated(bytes)) return null
+        val animated = item.animated || kind == StickerProcessor.Kind.AnimatedWebp || kind == StickerProcessor.Kind.Gif
+        return if (animated && StickerProcessor.isValidAnimated(bytes)) {
+            // Already in WhatsApp's animated format: keep it as is.
             store.file("$safeId.webp").writeBytes(bytes)
             LocalSticker(safeId, "$safeId.webp", animated = true, emojis = emojis, addedAt = clock())
         } else {
+            // Still images, and animated ones WhatsApp wouldn't take (TikTok's are a different size):
+            // a still sticker from the (first) frame, so it still lands in the pack.
             store.file("orig_$safeId").writeBytes(bytes) // kept so the outline can be redone later
             store.file("$safeId.webp").writeBytes(StickerProcessor.toStaticSticker(bytes, outline))
             LocalSticker(safeId, "$safeId.webp", animated = false, emojis = emojis, addedAt = clock())

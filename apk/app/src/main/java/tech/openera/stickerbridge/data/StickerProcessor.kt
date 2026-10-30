@@ -48,15 +48,26 @@ object StickerProcessor {
     fun isValidAnimated(b: ByteArray): Boolean =
         detect(b) == Kind.AnimatedWebp && b.size <= MAX_ANIMATED && webpCanvasSize(b) == (SIZE to SIZE)
 
-    /** Converts a still image (PNG, JPEG, WebP, or a GIF's first frame) to a WhatsApp sticker. */
+    /** Converts a still image, or the first frame of an animated one (GIF, animated WebP), to a WhatsApp sticker. */
     fun toStaticSticker(input: ByteArray, outline: Boolean): ByteArray {
-        val src = BitmapFactory.decodeByteArray(input, 0, input.size)
-            ?: throw IllegalArgumentException("Not an image")
+        val src = decodeFirstFrame(input) ?: throw IllegalArgumentException("Not an image")
         try {
             return encodeWebp(compose(src, outline), MAX_STATIC)
         } finally {
             src.recycle()
         }
+    }
+
+    /** First frame as a software bitmap; ImageDecoder (Android 9+) handles animated WebP reliably. */
+    fun decodeFirstFrame(input: ByteArray): Bitmap? {
+        if (Build.VERSION.SDK_INT >= 28 && detect(input) != Kind.Unknown) {
+            runCatching {
+                return android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(java.nio.ByteBuffer.wrap(input))) { d, _, _ ->
+                    d.allocator = android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE
+                }
+            }
+        }
+        return BitmapFactory.decodeByteArray(input, 0, input.size)
     }
 
     fun compose(src: Bitmap, outline: Boolean): Bitmap {

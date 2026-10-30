@@ -115,6 +115,17 @@ class SyncRepositoryTest {
         assertEquals(listOf(false, true), packs.map { it.animated })
     }
 
+    @Test fun animatedStickersWhatsAppWouldRejectBecomeStillOnes() = runBlocking {
+        // TikTok's DM stickers arrive as animated images in sizes WhatsApp won't take.
+        api.add("tiktok-anim", testPng(Color.BLUE), animated = true)
+        assertEquals(1, repo.sync().added)
+        val s = store.state.value.stickers.single()
+        assertFalse(s.animated)
+        val bytes = store.file(s.fileName).readBytes()
+        assertEquals("WEBP", String(bytes, 8, 4))
+        assertTrue(bytes.size <= StickerProcessor.MAX_STATIC)
+    }
+
     @Test fun expiredLoginSignsOut() = runBlocking {
         api.failWith = ApiException(401, "nope")
         val r = repo.sync()

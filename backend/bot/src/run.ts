@@ -3,9 +3,13 @@
  * (Cloudflare's hosted browser in production, a local Chromium in tests).
  */
 import type { Page } from "puppeteer-core";
-import { ROW_SELECTOR, acceptRequests, readInbox, reply } from "./inbox.ts";
-import { parseCookies, toInbox, type Cookie } from "./messages.ts";
-import { conversationUsers, extractJsonObjects, outline } from "./imdata.ts";
+import { ROW_SELECTOR, acceptRequests } from "./inbox.ts";
+import { parseCookies, type Cookie, type InboxMessage } from "./messages.ts";
+import {
+  botIdFromCookies, conversationUsers, extractJsonObjects, outline, parseImMessages, usernamesFrom, type ImMessage,
+} from "./imdata.ts";
+
+const CODE = /SB\s*-?\s*[23456789A-HJ-NP-Z]{6}/i;
 
 /** A normal desktop Chrome identity; TikTok holds back its inbox for browsers that say "HeadlessChrome". */
 export const USER_AGENT =
@@ -17,6 +21,8 @@ export interface PassConfig {
   sendReplies: boolean;
   /** TIKTOK_COOKIES: used only until a login has been saved on the server. */
   initialCookies: string;
+  /** How long to let the inbox fetch its message data (default 6 s). */
+  settleMs?: number;
 }
 
 /** Calls the API with the bot's key. */
@@ -73,20 +79,52 @@ export async function runPass(browserFactory: () => Promise<BrowserLike>, cfg: P
   let page: Page | null = null;
   try {
     page = await openPage(await browserFactory(), cookies);
+
+    // TikTok's page doesn't display stickers, but the message data it downloads contains them.
+    const data: Uint8Array[] = [];
+    const usernames = new Map<string, string>();
+    let accountId: string | undefined;
+    page.on("response", async (res) => {
+      const url = res.url();
+      try {
+        if (/im-api[^/]*\/v\d\/message\//.test(url) || /\/im-api\//.test(url)) {
+          data.push(new Uint8Array(await res.buffer()));
+        } else if (/\/im\/user\/profile|\/api\/user\/|\/im\/spotlight/.test(url)) {
+          usernamesFrom(await res.json(), usernames);
+        } else if (url.includes("/passport/web/account/info")) {
+          accountId = ((await res.json()) as { data?: { user_id_str?: string } }).data?.user_id_str ?? accountId;
+        }
+      } catch {
+        // a response without a readable body: ignore
+      }
+    });
+
     // New people's first messages wait in "Message requests": accept them first.
     report.accepted = await acceptRequests(page, cfg.inboxUrl, cfg.maxChats).catch(() => 0);
-    const chats = await readInbox(page, cfg.inboxUrl, cfg.maxChats);
+    // Load the inbox (again, after accepting) and give TikTok a moment to fetch messages.
+    await page.goto(cfg.inboxUrl, { waitUntil: "domcontentloaded", timeout: 45_000 });
+    await page.waitForSelector(ROW_SELECTOR, { timeout: 30_000 });
     report.loggedIn = true;
-    report.chats = chats.length;
-    for (const chat of chats) {
-      for (const msg of await toInbox(chat)) {
-        const res = await api("/internal/inbox", { method: "POST", body: JSON.stringify(msg) });
-        const body = (await res.json().catch(() => ({}))) as { action?: string; reply?: string | null };
-        const action = body.action ?? `http_${res.status}`;
-        report.results[action] = (report.results[action] ?? 0) + 1;
-        report.sent++;
-        if (cfg.sendReplies && body.reply && action !== "duplicate") await reply(page, body.reply).catch(() => {});
-      }
+    await new Promise((r) => setTimeout(r, cfg.settleMs ?? 6000));
+
+    const botId = botIdFromCookies(cookies) ?? accountId;
+    const messages = new Map<string, ImMessage>();
+    for (const buf of data) for (const m of parseImMessages(buf, botId)) messages.set(m.messageId, m);
+    report.chats = new Set([...messages.values()].map((m) => m.senderId)).size;
+
+    for (const m of messages.values()) {
+      if (m.kind === "text" && !CODE.test(m.text ?? "")) continue; // only codes matter
+      const msg: InboxMessage = {
+        messageId: `tt:${m.messageId}`,
+        sender: { id: m.senderId, username: usernames.get(m.senderId) ?? `u_${m.senderId}` },
+        type: m.kind,
+        ...(m.kind === "text" ? { text: m.text } : { url: m.url }),
+      };
+      const res = await api("/internal/inbox", { method: "POST", body: JSON.stringify(msg) });
+      const body = (await res.json().catch(() => ({}))) as { action?: string };
+      const action = body.action ?? `http_${res.status}`;
+      report.results[action] = (report.results[action] ?? 0) + 1;
+      report.sent++;
     }
     // Keep TikTok's refreshed login for next time.
     const fresh = await page.cookies();
@@ -119,9 +157,12 @@ export async function debugPass(browserFactory: () => Promise<BrowserLike>, cfg:
       const objs = extractJsonObjects(raw);
       entry.json = [
         { users: conversationUsers(raw).slice(0, 5), objects: objs.length },
-        ...objs.slice(0, 4).map((o) => outline(o)),
+        ...objs.slice(0, 30).map((o) => outline(o)),
         ...objs.filter((o) => JSON.stringify(o).includes("sticker")).slice(0, 2).map((o) => JSON.stringify(o).match(/https?:\/\/[^"]+/g)?.slice(0, 4)),
       ];
+      // Readable text runs (links, ids, field names) for working out non-JSON message types.
+      const runs = new TextDecoder("latin1").decode(raw).match(/[\x20-\x7e]{6,}/g) ?? [];
+      (entry as { strings?: string[] }).strings = runs.filter((s) => !s.includes('"nickname"')).slice(0, 400);
     }
     network.push(entry);
   });

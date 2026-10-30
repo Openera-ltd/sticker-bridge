@@ -1,74 +1,59 @@
 /**
- * Runs the real bot in a real Chromium against a fake TikTok inbox and a fake API.
+ * Runs a real bot pass in a real Chromium against a fake TikTok inbox and a fake API.
+ * The fake inbox behaves like TikTok's: the page shows "message type isn't supported",
+ * and the stickers only arrive in the im-api message data it downloads.
  * Skipped when no Chromium is available (set CHROME_PATH).
  */
 import { createServer, type Server } from "node:http";
 import { existsSync } from "node:fs";
 import type { AddressInfo } from "node:net";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import puppeteer from "puppeteer-core";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runPass, type Api, type PassConfig } from "./run.ts";
-
-/** Runs one pass in a local Chromium, the same way the Cloudflare worker does with its hosted browser. */
-class Bot {
-  private browser: Awaited<ReturnType<typeof puppeteer.launch>> | null = null;
-  constructor(private c: PassConfig & { apiBase: string }) {}
-  run() {
-    const api: Api = (path, init = {}) =>
-      fetch(this.c.apiBase + path, { ...init, headers: { authorization: "Bearer s3cret", "content-type": "application/json" } });
-    return runPass(async () => (this.browser ??= await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-sandbox"] })), this.c, api);
-  }
-  async closeBrowser() {
-    await this.browser?.close();
-  }
-}
-type Config = PassConfig & { apiBase: string };
+import { stickerMsg, textMsg } from "./imdata.test.ts";
 
 const CHROME = process.env.CHROME_PATH ?? "/opt/pw-browsers/chromium-1243/chrome-linux64/chrome";
+const BOT = "7604267844595581974";
+const MIA = "7548886268853404727";
+const NEW = "7111111111111111111";
+const STICKER2 = "https://p16-tiktok-dm-sticker-sign-useastred.tiktokcdn-eu.com/tos-useast2a/3e85f70ec853~tplv-video2sticker-mid.awebp?x-signature=abc";
 
 let accepted = false;
-const inbox = () => `<!doctype html><html><body>
+const page = () => `<!doctype html><html><body>
 <div id="list">
   <div class="requests-entry" onclick="showRequests()"><span>Message requests</span></div>
-  <div data-e2e="chat-list-item" onclick="openChat('mia.draws')">Mia</div>
-  <div data-e2e="chat-list-item" onclick="openChat('sam_1')">Sam</div>
-  ${accepted ? `<div data-e2e="chat-list-item" onclick="openChat('new.person')">New</div>` : ""}
+  <div data-e2e="dm-new-conversation-item">Mia · This message type isn’t supported.</div>
 </div>
-<main data-e2e="chat-main" id="main"></main>
+<main data-e2e="dm-new-chatbox" id="main"></main>
 <script>
-  const chats = {
-    'mia.draws': '<div data-e2e="chat-item"><a href="/@mia.draws"><img width="32" height="32" src="https://p16-sign.tiktokcdn.com/avatar.jpg"></a>my code SB-7KQ4MZ</div>'
-      + '<div data-e2e="chat-item"><img width="120" height="120" src="https://p16-sign.tiktokcdn.com/sticker/one.webp?sig=a"></div>',
-    'new.person': '<div data-e2e="chat-item">SB-ABCDEF</div>',
-    'sam_1': '<div data-e2e="chat-item"><a href="/@sam_1">Sam</a></div>'
-      + '<div data-e2e="chat-item"><img width="140" height="140" src="https://p16-sign.tiktokcdn.com/sticker/two.gif?sig=b"></div>'
-      + '<div data-e2e="chat-item">lol</div>',
-  };
+  fetch('/im-api/v2/message/get_by_user_init');
+  fetch('/tiktok/v1/im/user/profile/');
   function showRequests() {
-    document.getElementById('list').innerHTML = ${accepted ? "''" : `'<div data-e2e="chat-list-item" onclick="openRequest()">new.person</div>'`};
+    document.getElementById('list').innerHTML = ${accepted ? "''" : `'<div data-e2e="dm-new-conversation-item" onclick="openRequest()">new.person</div>'`};
   }
   function openRequest() {
-    document.getElementById('main').innerHTML = '<p>new.person wants to send you a message</p><button onclick="fetch(\\'/accept\\', {method:\\'POST\\'}).then(() => { document.getElementById(\\'list\\').innerHTML = \\'\\'; })">Accept</button><button>Delete</button>';
-  }
-  function openChat(u) {
-    history.replaceState(null, '', '/messages?u=' + (u === 'mia.draws' ? '7012345678901234567' : ''));
-    document.getElementById('main').innerHTML = '<header><a href="/@' + u + '">@' + u + '</a></header>' + chats[u]
-      + '<div contenteditable="true" id="box"></div>';
-    document.getElementById('box').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); fetch('/typed', { method: 'POST', body: e.target.innerText.trim() }); e.target.innerText = ''; }
-    });
+    document.getElementById('main').innerHTML = '<button onclick="fetch(\\'/accept\\', {method:\\'POST\\'}).then(() => { document.getElementById(\\'list\\').innerHTML = \\'\\'; })">Accept</button><button>Delete</button>';
   }
 </script></body></html>`;
+
+function imData(): Buffer {
+  const msgs = [
+    ...stickerMsg("de3294a0-9d81-41e9-abde-69020ce778ba", undefined, MIA),
+    ...stickerMsg("2aa15f0c-1dac-416a-9e0c-ea7c80ec96a3", STICKER2, MIA),
+    ...textMsg("69582e88-8c84-47eb-9e73-0d044e207bf0", "lol", MIA),
+    ...(accepted ? textMsg("00c056db-f156-49eb-8f7f-e17a3aebbfaf", "my code SB-ABCDEF", NEW) : []),
+  ];
+  return Buffer.from(Uint8Array.from([8, 1, ...msgs]));
+}
 
 let tiktok: Server, api: Server;
 let tiktokUrl = "", apiUrl = "";
 const posted: any[] = [];
-const typed: string[] = [];
 let savedState: any = null;
 let cookiesSeen = "";
 
 function listen(s: Server) {
-  return new Promise<string>((r) => s.listen(0, "127.0.0.1", () => r(`http://127.0.0.1:${(s.address() as AddressInfo).port}`)));
+  return new Promise<string>((r) => s.listen(0, "127.0.0.1", () => r(`http://localhost:${(s.address() as AddressInfo).port}`)));
 }
 const body = (req: any) => new Promise<string>((r) => { let b = ""; req.on("data", (c: any) => (b += c)); req.on("end", () => r(b)); });
 
@@ -77,10 +62,17 @@ beforeAll(async () => {
     if (req.url?.startsWith("/messages")) {
       cookiesSeen = req.headers.cookie ?? "";
       res.writeHead(200, { "content-type": "text/html" });
-      return res.end(inbox());
+      return res.end(page());
+    }
+    if (req.url?.startsWith("/im-api/")) {
+      res.writeHead(200, { "content-type": "application/x-protobuf" });
+      return res.end(imData());
+    }
+    if (req.url?.startsWith("/tiktok/v1/im/user/profile")) {
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify({ users: [{ uid: MIA, unique_id: "mia.draws" }] }));
     }
     if (req.url === "/accept") { accepted = true; return res.end("ok"); }
-    if (req.url === "/typed") { typed.push(await body(req)); return res.end("ok"); }
     res.writeHead(404); res.end();
   });
   api = createServer(async (req, res) => {
@@ -94,7 +86,7 @@ beforeAll(async () => {
       const m = JSON.parse(await body(req));
       posted.push(m);
       res.writeHead(200, { "content-type": "application/json" });
-      return res.end(JSON.stringify({ action: m.type === "text" ? "linked" : "stored", reply: m.type === "text" ? "Connected" : "Got it" }));
+      return res.end(JSON.stringify({ action: m.type === "text" ? "linked" : "stored" }));
     }
     res.writeHead(404); res.end();
   });
@@ -103,53 +95,59 @@ beforeAll(async () => {
 
 afterAll(() => { tiktok?.close(); api?.close(); });
 
-const cfg = (): Config => ({
-  apiBase: apiUrl, initialCookies: JSON.stringify([{ name: "sessionid", value: "first-login", domain: "localhost" }]),
-  inboxUrl: `${tiktokUrl}/messages?lang=en`, maxChats: 10, sendReplies: true,
+const login = (session = "first-login") => JSON.stringify([
+  { name: "sessionid", value: session, domain: "localhost" },
+  { name: "multi_sids", value: encodeURIComponent(`${MIA}:other|${BOT}:${session}`), domain: "localhost" },
+]);
+
+const cfg = (over: Partial<PassConfig> = {}): PassConfig => ({
+  initialCookies: login(), inboxUrl: `${tiktokUrl}/messages?lang=en`, maxChats: 10, sendReplies: false, settleMs: 1500, ...over,
 });
 
+async function pass(c: PassConfig) {
+  let browser: Awaited<ReturnType<typeof puppeteer.launch>> | null = null;
+  const callApi: Api = (path, init = {}) =>
+    fetch(apiUrl + path, { ...init, headers: { authorization: "Bearer s3cret", "content-type": "application/json" } });
+  try {
+    return await runPass(async () => (browser ??= await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-sandbox"] })), c, callApi);
+  } finally {
+    await (browser as any)?.close();
+  }
+}
+
 describe.skipIf(!existsSync(CHROME))("bot in a real browser", () => {
-  it("reads chats, posts codes and stickers, replies, and saves its login", async () => {
-    const bot = new Bot({ ...cfg(), inboxUrl: cfg().inboxUrl.replace("127.0.0.1", "localhost") });
-    const r = await bot.run();
-    await bot.closeBrowser();
+  it("accepts requests, then takes stickers and codes from TikTok's message data", async () => {
+    const r = await pass(cfg());
     expect(r.error).toBeUndefined();
-    expect(r).toMatchObject({ ok: true, loggedIn: true, accepted: 1, chats: 3, sent: 4 });
-    // The accepted request's code reached the API in the same run.
-    expect(posted.find((m) => m.text === "SB-ABCDEF")?.sender.username).toBe("new.person");
+    expect(r).toMatchObject({ ok: true, loggedIn: true, accepted: 1, chats: 2, sent: 3 });
     expect(cookiesSeen).toContain("sessionid=first-login");
 
-    const code = posted.find((m) => m.type === "text");
-    expect(code).toMatchObject({ text: "my code SB-7KQ4MZ", sender: { id: "7012345678901234567", username: "mia.draws" } });
     const stickers = posted.filter((m) => m.type === "sticker");
-    expect(stickers.map((s) => s.sender.username)).toEqual(["mia.draws", "sam_1"]);
-    expect(stickers[1]).toMatchObject({ animated: true, sender: { id: "u_sam_1" } }); // no id on the page: username fallback
-    expect(stickers.every((s) => !s.url.includes("avatar"))).toBe(true);
-
-    expect(typed).toEqual(["Connected", "Got it", "Got it", "Connected"]);
-    expect(savedState.cookies.some((c: any) => c.name === "sessionid" && c.value === "first-login")).toBe(true);
+    expect(stickers).toHaveLength(2);
+    expect(stickers[0]).toMatchObject({ messageId: "tt:de3294a0-9d81-41e9-abde-69020ce778ba", sender: { id: MIA, username: "mia.draws" } });
+    expect(stickers[0].url).toMatch(/^https:\/\/p16-tiktok-dm-sticker-sign-sg\.ibyteimg\.com\/.+x-signature=/);
+    expect(stickers[1].url).toBe(STICKER2);
+    // "lol" isn't a code, so it isn't sent; the new person's code is, with an id-based name.
+    const codes = posted.filter((m) => m.type === "text");
+    expect(codes).toEqual([{ messageId: "tt:00c056db-f156-49eb-8f7f-e17a3aebbfaf", sender: { id: NEW, username: `u_${NEW}` }, type: "text", text: "my code SB-ABCDEF" }]);
+    expect(savedState.cookies.some((c: any) => c.name === "sessionid")).toBe(true);
   }, 90_000);
 
-  it("prefers the login saved on the server after a restart", async () => {
-    savedState = { cookies: [{ name: "sessionid", value: "refreshed", domain: "localhost", path: "/" }] };
-    const bot = new Bot({ ...cfg(), inboxUrl: cfg().inboxUrl.replace("127.0.0.1", "localhost"), sendReplies: false });
-    const r = await bot.run();
-    await bot.closeBrowser();
+  it("prefers the login saved on the server", async () => {
+    savedState = { cookies: JSON.parse(login("refreshed")).map((c: any) => ({ ...c, path: "/" })) };
+    const r = await pass(cfg());
     expect(r.ok).toBe(true);
     expect(cookiesSeen).toContain("sessionid=refreshed");
   }, 90_000);
 
   it("does nothing without a login", async () => {
     savedState = null;
-    const bot = new Bot({ ...cfg(), initialCookies: "" });
-    const r = await bot.run();
+    const r = await pass(cfg({ initialCookies: "" }));
     expect(r).toMatchObject({ ok: false, error: "No TikTok login yet (set TIKTOK_COOKIES)" });
   });
 
-  it("reports a clear error when the inbox can't be read (e.g. logged out)", async () => {
-    const bot = new Bot({ ...cfg(), inboxUrl: `${tiktokUrl}/nope` });
-    const r = await bot.run();
-    await bot.closeBrowser();
+  it("reports a clear error when the inbox doesn't load (e.g. logged out)", async () => {
+    const r = await pass(cfg({ inboxUrl: `${tiktokUrl}/nope` }));
     expect(r.ok).toBe(false);
     expect(r.loggedIn).toBe(false);
     expect(r.error).toMatch(/Waiting for selector/);

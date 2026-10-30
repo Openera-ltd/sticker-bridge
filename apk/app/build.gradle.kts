@@ -24,8 +24,8 @@ android {
         applicationId = "tech.openera.stickerbridge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.0.1"
 
         // The ONLY server the app talks to. Everything goes through it.
         buildConfigField("String", "API_BASE", "\"https://api.sticker.openera.tech/\"")

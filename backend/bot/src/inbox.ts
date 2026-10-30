@@ -86,9 +86,14 @@ export async function acceptRequests(page: Page, inboxUrl: string, max: number):
   await new Promise((r) => setTimeout(r, 1500));
 
   let accepted = 0;
+  let previous: string | null = null;
   for (let i = 0; i < max; i++) {
     const rows = await page.$$(ROW_SELECTOR);
     if (!rows.length) break;
+    // If the request we just accepted is still on top, stop rather than accept it again.
+    const label = await rows[0].evaluate((el) => (el as HTMLElement).innerText.trim());
+    if (label === previous) break;
+    previous = label;
     await rows[0].click();
     await new Promise((r) => setTimeout(r, 1200));
     if (!(await clickByText("^accept$", 'button, [role="button"], div, span'))) break;
