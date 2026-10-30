@@ -3,8 +3,8 @@
 FROM node:22-slim
 
 WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev --no-audit --no-fund
+COPY package.json package-lock.json .npmrc ./
+RUN npm ci --omit=dev --no-audit --no-fund --legacy-peer-deps
 
 # Chrome headless shell matching puppeteer-core, with the system libraries it needs.
 RUN npx --yes @puppeteer/browsers@2.13.2 install chrome-headless-shell@155.0.8059.39 --path /opt/chrome --install-deps \
