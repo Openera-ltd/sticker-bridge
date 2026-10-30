@@ -104,6 +104,40 @@ export class Bot {
     this.browser = null;
   }
 
+  /** What the bot sees on TikTok's inbox page: for adjusting selectors when TikTok changes its layout. */
+  async debug(): Promise<unknown> {
+    const cookies = await this.loadCookies();
+    if (!cookies.length) return { error: "No TikTok login yet" };
+    const browser = await this.getBrowser();
+    const page = await browser.newPage();
+    try {
+      await page.setViewport({ width: 1280, height: 900 });
+      await browser.setCookie(...cookies);
+      await page.goto(this.cfg.inboxUrl, { waitUntil: "domcontentloaded", timeout: 45_000 });
+      await new Promise((r) => setTimeout(r, 12_000));
+      const info = await page.evaluate(() => {
+        const e2e: Record<string, number> = {};
+        document.querySelectorAll("[data-e2e]").forEach((el) => {
+          const k = el.getAttribute("data-e2e") ?? "";
+          e2e[k] = (e2e[k] ?? 0) + 1;
+        });
+        const classes: Record<string, number> = {};
+        document.querySelectorAll("[class]").forEach((el) => {
+          for (const c of String(el.getAttribute("class")).split(/\s+/)) {
+            const m = c.match(/^css-[a-z0-9]+-(Div|Span|A|Img|Button|P|Li|Ul|Main|Header|Section)?([A-Za-z]+)$/);
+            const key = m ? m[2] : null;
+            if (key) classes[key] = (classes[key] ?? 0) + 1;
+          }
+        });
+        return { url: location.href, title: document.title, e2e, classes, text: document.body.innerText.slice(0, 1500) };
+      });
+      const shot = await page.screenshot({ type: "jpeg", quality: 50, encoding: "base64" });
+      return { ...info, screenshot: shot };
+    } finally {
+      await page.close().catch(() => {});
+    }
+  }
+
   /** One pass over the inbox. Never runs twice at the same time. */
   run(): Promise<RunReport> {
     this.running ??= this.doRun().finally(() => (this.running = null));
@@ -166,6 +200,10 @@ export function startServer(bot: Bot, cfg: Config, port: number) {
     if (req.url === "/run" && req.method === "POST") {
       if (req.headers.authorization !== `Bearer ${cfg.botSecret}` || !cfg.botSecret) return send(401, { error: "Unauthorized" });
       return send(200, await bot.run());
+    }
+    if (req.url === "/debug" && req.method === "POST") {
+      if (req.headers.authorization !== `Bearer ${cfg.botSecret}` || !cfg.botSecret) return send(401, { error: "Unauthorized" });
+      return send(200, await bot.debug().catch((e) => ({ error: String(e) })));
     }
     send(404, { error: "Not found" });
   });

@@ -65,15 +65,56 @@ export async function toInbox(chat: SeenChat): Promise<InboxMessage[]> {
   return out;
 }
 
-/** Accepts cookies as a Cookie header ("a=1; b=2") or a browser-extension JSON export. */
-export function parseCookies(raw: string): { name: string; value: string; domain: string; path: string; secure: boolean; httpOnly: boolean }[] {
+export interface Cookie {
+  name: string;
+  value: string;
+  domain: string;
+  path: string;
+  secure: boolean;
+  httpOnly: boolean;
+  expires?: number;
+}
+
+/**
+ * Reads cookies in any common export format: a Cookie header ("a=1; b=2"),
+ * a JSON list (browser extensions), or a Netscape cookies.txt file.
+ */
+export function parseCookies(raw: string): Cookie[] {
   const t = raw.trim();
   if (!t) return [];
   if (t.startsWith("[")) {
-    const list = JSON.parse(t) as { name: string; value: string; domain?: string; path?: string; secure?: boolean; httpOnly?: boolean }[];
+    const list = JSON.parse(t) as (Partial<Cookie> & { expirationDate?: number })[];
     return list
       .filter((c) => c.name && typeof c.value === "string")
-      .map((c) => ({ name: c.name, value: c.value, domain: c.domain ?? ".tiktok.com", path: c.path ?? "/", secure: c.secure ?? true, httpOnly: c.httpOnly ?? false }));
+      .map((c) => {
+        const expires = c.expires ?? c.expirationDate;
+        return {
+          name: c.name!, value: c.value!, domain: c.domain ?? ".tiktok.com", path: c.path ?? "/",
+          secure: c.secure ?? true, httpOnly: c.httpOnly ?? false, ...(expires && expires > 0 ? { expires } : {}),
+        };
+      });
+  }
+  const lines = t.split(/\r?\n/);
+  // Tabs often turn into spaces when a file is pasted into chat, so either works.
+  const fields = (l: string) => (l.includes("\t") ? l.split("\t") : l.trim().split(/\s+/));
+  const isNetscape = (l: string) => {
+    const f = fields(l.replace(/^#HttpOnly_/, ""));
+    return f.length >= 7 && /^(TRUE|FALSE)$/i.test(f[1]) && /^(TRUE|FALSE)$/i.test(f[3]);
+  };
+  if (lines.some(isNetscape)) {
+    // Netscape format: domain, includeSubdomains, path, secure, expiry, name, value (tab-separated)
+    return lines.flatMap((line) => {
+      let l = line;
+      let httpOnly = false;
+      if (l.startsWith("#HttpOnly_")) { httpOnly = true; l = l.slice("#HttpOnly_".length); }
+      if (!l.trim() || l.startsWith("#") || !isNetscape(l)) return [];
+      const f = fields(l);
+      const expires = Number(f[4]);
+      return [{
+        name: f[5], value: f.slice(6).join(l.includes("\t") ? "\t" : " "), domain: f[0], path: f[2] || "/",
+        secure: f[3].toUpperCase() === "TRUE", httpOnly, ...(expires > 0 ? { expires } : {}),
+      }];
+    });
   }
   return t.split(";").map((p) => p.trim()).filter(Boolean).map((p) => {
     const i = p.indexOf("=");
