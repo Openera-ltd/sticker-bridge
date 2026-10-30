@@ -29,6 +29,10 @@ export interface LiveConfig {
   staleAfterMs: number;
   /** Start a fresh browser this often, to keep memory from creeping. */
   restartEveryMs: number;
+  /** Container memory (MB) at which Chrome is asked to free caches and collect garbage. */
+  memSoftMB: number;
+  /** Container memory (MB) at which Chrome is restarted, well before Render's 512 MB kill. */
+  memHardMB: number;
 }
 
 export function configFromEnv(env = process.env): LiveConfig {
@@ -42,7 +46,9 @@ export function configFromEnv(env = process.env): LiveConfig {
     loadTimeoutMs: Number(env.LOAD_TIMEOUT_S ?? 240) * 1000,
     requestsEveryMs: min(env.REQUESTS_EVERY_MIN, 2),
     staleAfterMs: min(env.STALE_AFTER_MIN, 20),
-    restartEveryMs: min(env.RESTART_EVERY_MIN, 360),
+    restartEveryMs: min(env.RESTART_EVERY_MIN, 180),
+    memSoftMB: Number(env.MEM_SOFT_MB ?? 340),
+    memHardMB: Number(env.MEM_HARD_MB ?? 430),
   };
 }
 
@@ -54,7 +60,8 @@ const CHROME_ARGS = [
   "--disable-default-apps", "--disable-sync", "--metrics-recording-only", "--mute-audio", "--no-first-run",
   "--renderer-process-limit=1", "--disable-site-isolation-trials",
   "--disable-features=Translate,MediaRouter,OptimizationHints,site-per-process,IsolateOrigins,BackForwardCache",
-  "--js-flags=--max-old-space-size=256", "--disable-blink-features=AutomationControlled",
+  "--js-flags=--max-old-space-size=160 --max-semi-space-size=2", "--aggressive-cache-discard",
+  "--disk-cache-size=1048576", "--media-cache-size=1", "--disable-blink-features=AutomationControlled",
   "--blink-settings=imagesEnabled=false", "--lang=en-GB", "--window-size=1024,700",
 ];
 
@@ -73,7 +80,7 @@ export class LiveInbox {
   startedAt = Date.now();
   lastDataAt = 0;
   lastError: string | null = null;
-  counts = { frames: 0, responses: 0, messages: 0, posted: 0, accepted: 0, restarts: 0 };
+  counts = { frames: 0, responses: 0, messages: 0, posted: 0, accepted: 0, restarts: 0, trims: 0, memRestarts: 0 };
   results: Record<string, number> = {};
   private browser: Browser | null = null;
   private page: Page | null = null;
@@ -139,13 +146,21 @@ export class LiveInbox {
 
     // Messages TikTok pushes to the open tab arrive on its WebSocket.
     this.cdp = await page.createCDPSession();
-    await this.cdp.send("Network.enable");
+    // Keep only small copies of network data in Chrome. The defaults (about 100 MB per connection)
+    // slowly fill the 512 MB box. 4 MB per response is plenty for message data.
+    const small = { maxTotalBufferSize: 8_000_000, maxResourceBufferSize: 4_000_000, maxPostDataSize: 0 };
+    await this.cdp.send("Network.enable", small);
+    const own = (page as unknown as { _client?: () => { send: (m: string, p: object) => Promise<unknown> } })._client?.();
+    await own?.send("Network.enable", small).catch(() => {});
+    await this.cdp.send("Network.setCacheDisabled", { cacheDisabled: true }).catch(() => {});
     this.cdp.on("Network.webSocketFrameReceived", (e: { response: { opcode: number; payloadData: string } }) => {
       const data = e.response.opcode === 2 ? Buffer.from(e.response.payloadData, "base64") : Buffer.from(e.response.payloadData);
       this.counts.frames++;
       this.handle(new Uint8Array(data), "ws");
     });
 
+    // Watch memory from the start: the first load is the heaviest moment.
+    this.timers.push(setInterval(() => void this.watchMemory(), 20_000));
     this.log("loading tiktok messages (one tab, images/media blocked)…");
     await page.goto(this.cfg.inboxUrl, { waitUntil: "domcontentloaded", timeout: this.cfg.loadTimeoutMs });
     // On a slow CPU the chat list can take ages to draw while message data already flows.
@@ -158,6 +173,7 @@ export class LiveInbox {
     this.log(`live after ${Math.round((Date.now() - this.startedAt) / 1000)}s`);
 
     this.timers.push(setInterval(() => void this.housekeeping(), Math.min(this.cfg.requestsEveryMs, 60_000)));
+
     await this.saveLogin();
   }
 
@@ -245,6 +261,34 @@ export class LiveInbox {
     }
   }
 
+  /** Every 20 s: keep Chrome well under Render's memory limit. */
+  memMB: number | null = null;
+  memPeakMB = 0;
+  private trimming = false;
+  async watchMemory() {
+    const mem = await containerMemMB();
+    const used = mem?.usedMB ?? null;
+    this.memMB = used;
+    if (used == null || this.trimming) return;
+    this.memPeakMB = Math.max(this.memPeakMB, used);
+    if (used >= this.cfg.memHardMB && this.status === "live") {
+      this.counts.memRestarts++;
+      return void this.restart(`memory ${used} MB`);
+    }
+    if (used >= this.cfg.memSoftMB && this.cdp) {
+      this.trimming = true;
+      try {
+        await this.cdp.send("Memory.simulatePressureNotification", { level: "critical" }).catch(() => {});
+        await this.cdp.send("HeapProfiler.collectGarbage").catch(() => {});
+        this.counts.trims++;
+        const after = (await containerMemMB())?.usedMB;
+        this.log(`memory ${used} MB: trimmed to ${after ?? "?"} MB`);
+      } finally {
+        this.trimming = false;
+      }
+    }
+  }
+
   private async saveLogin() {
     const fresh = await this.browser?.cookies().catch(() => []);
     if (fresh?.length) await this.api("/internal/bot-state", { method: "PUT", body: JSON.stringify({ cookies: fresh }) }).catch(() => {});
@@ -293,6 +337,8 @@ export class LiveInbox {
       results: this.results,
       lastError: this.lastError,
       nodeMemMB: Math.round(mem.rss / 1e6),
+      memMB: this.memMB,
+      memPeakMB: this.memPeakMB,
     };
   }
 
@@ -305,7 +351,7 @@ export class LiveInbox {
  * Container memory from cgroups: total, and the part that really counts ("used" = without file cache,
  * which the system frees on its own before running out).
  */
-async function containerMemMB(): Promise<{ totalMB: number; usedMB: number | null } | null> {
+export async function containerMemMB(): Promise<{ totalMB: number; usedMB: number | null } | null> {
   const { readFile } = await import("node:fs/promises");
   const total = await readFile("/sys/fs/cgroup/memory.current", "utf8").catch(() => null);
   if (!total) return null;

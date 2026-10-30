@@ -86,7 +86,7 @@ describe.skipIf(!existsSync(CHROME))("live bot", () => {
         { name: "sessionid", value: "abc", domain: "localhost" },
         { name: "multi_sids", value: encodeURIComponent(`${BOT}:abc`), domain: "localhost" },
       ]),
-      loadTimeoutMs: 30_000, requestsEveryMs: 60_000, staleAfterMs: 600_000, restartEveryMs: 3_600_000,
+      loadTimeoutMs: 30_000, requestsEveryMs: 60_000, staleAfterMs: 600_000, restartEveryMs: 3_600_000, memSoftMB: 100_000, memHardMB: 100_000,
     };
     const bot = new LiveInbox(cfg);
     try {
