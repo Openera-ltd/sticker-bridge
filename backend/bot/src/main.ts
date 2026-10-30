@@ -47,11 +47,17 @@ export interface RunReport {
   ms: number;
 }
 
-// Chromium flags that keep memory low enough for Render's free 512 MB.
+// A normal desktop Chrome identity; TikTok holds back its inbox for browsers that say "HeadlessChrome".
+export const USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
+
+// Chromium flags that keep memory low enough for Render's free 512 MB,
+// plus not announcing the browser as automated.
 const CHROME_ARGS = [
   "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu",
   "--no-zygote", "--disable-extensions", "--disable-background-networking", "--mute-audio",
   "--renderer-process-limit=1", "--js-flags=--max-old-space-size=192",
+  "--disable-blink-features=AutomationControlled", "--lang=en-GB", "--window-size=1280,900",
 ];
 
 export class Bot {
@@ -114,20 +120,21 @@ export class Bot {
   }
 
   /** What the bot sees on TikTok's inbox page: for adjusting selectors when TikTok changes its layout. */
-  debug(): Promise<unknown> {
-    return this.exclusive(() => this.doDebug());
+  debug(waitMs = 12_000): Promise<unknown> {
+    return this.exclusive(() => this.doDebug(Math.min(waitMs, 90_000)));
   }
 
-  private async doDebug(): Promise<unknown> {
+  private async doDebug(waitMs: number): Promise<unknown> {
     const cookies = await this.loadCookies();
     if (!cookies.length) return { error: "No TikTok login yet" };
     const browser = await this.getBrowser();
     const page = await browser.newPage();
     try {
       await page.setViewport({ width: 1280, height: 900 });
+      await page.setUserAgent(USER_AGENT);
       await browser.setCookie(...cookies);
       await page.goto(this.cfg.inboxUrl, { waitUntil: "domcontentloaded", timeout: 45_000 });
-      await new Promise((r) => setTimeout(r, 12_000));
+      await new Promise((r) => setTimeout(r, waitMs));
       const info = await page.evaluate(() => {
         const e2e: Record<string, number> = {};
         document.querySelectorAll("[data-e2e]").forEach((el) => {
@@ -172,6 +179,7 @@ export class Bot {
       const browser = await this.getBrowser();
       page = await browser.newPage();
       await page.setViewport({ width: 1280, height: 900 });
+      await page.setUserAgent(USER_AGENT);
       await page.setRequestInterception(true);
       page.on("request", (r) => (["media", "font"].includes(r.resourceType()) ? r.abort() : r.continue()));
       await browser.setCookie(...cookies);
@@ -216,9 +224,10 @@ export function startServer(bot: Bot, cfg: Config, port: number) {
       if (req.headers.authorization !== `Bearer ${cfg.botSecret}` || !cfg.botSecret) return send(401, { error: "Unauthorized" });
       return send(200, await bot.run());
     }
-    if (req.url === "/debug" && req.method === "POST") {
+    if (req.url?.startsWith("/debug") && req.method === "POST") {
       if (req.headers.authorization !== `Bearer ${cfg.botSecret}` || !cfg.botSecret) return send(401, { error: "Unauthorized" });
-      return send(200, await bot.debug().catch((e) => ({ error: String(e) })));
+      const wait = Number(new URL(req.url, "http://x").searchParams.get("wait") ?? 12) * 1000;
+      return send(200, await bot.debug(wait).catch((e) => ({ error: String(e) })));
     }
     send(404, { error: "Not found" });
   });
