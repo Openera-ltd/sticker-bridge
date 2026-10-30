@@ -6,8 +6,9 @@
 import type { Page } from "puppeteer-core";
 import type { SeenChat } from "./messages.ts";
 
-export const ROW_SELECTOR = '[data-e2e*="chat-list-item"], [data-e2e*="conversation"], [class*="ConversationListItem"], div[data-index]';
-export const CHAT_SELECTOR = '[data-e2e*="chat-main"], [class*="ChatMain"], [class*="ChatBox"], main';
+// Seen on tiktok.com/messages (Oct 2026): dm-new-conversation-item rows, dm-new-chatbox for the open chat.
+export const ROW_SELECTOR = '[data-e2e="dm-new-conversation-item"], [data-e2e="chat-list-item"]';
+export const CHAT_SELECTOR = '[data-e2e="dm-new-chatbox"], [data-e2e="chat-main"], main';
 export const BUBBLE_SELECTOR = '[data-e2e*="chat-item"], [class*="ChatItem"], [class*="MessageItem"]';
 
 export async function readInbox(page: Page, inboxUrl: string, maxChats: number): Promise<SeenChat[]> {

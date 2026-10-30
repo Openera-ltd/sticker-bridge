@@ -11,8 +11,6 @@ export interface Env {
   BOT_SECRET: string;
   /** For publishing app updates and changing config. */
   ADMIN_SECRET: string;
-  /** The bot on Render; pinged so the free instance never sleeps. */
-  BOT_URL?: string;
 }
 
 const CODE_TTL_MS = 10 * 60_000;
@@ -20,7 +18,6 @@ const STICKER_TTL_MS = 30 * 24 * 60 * 60_000;
 const MAX_STICKER_BYTES = 5 * 1024 * 1024;
 const MAX_CODES_PER_HOUR = 6;
 const PAGE = 50;
-export const KEEP_AWAKE_CRON = "*/10 * * * *";
 const CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"; // no 0/O/1/I/L
 
 // ---------- small helpers ----------
@@ -326,7 +323,7 @@ export function isAnimated(b: Uint8Array): boolean {
   return false;
 }
 
-/** The bot keeps its TikTok login here, so a Render restart doesn't lose it. */
+/** The bot keeps its TikTok login here and refreshes it after every run. */
 async function botState(env: Env, req: Request): Promise<Response> {
   if (!(await sameSecret(bearer(req) ?? "", env.BOT_SECRET))) return error(401, "Bot only");
   const key = "bot/state.json";
@@ -425,12 +422,7 @@ export default {
     }
   },
 
-  async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext) {
-    if (event.cron === KEEP_AWAKE_CRON) {
-      // Keeps the free Render instance from sleeping.
-      if (env.BOT_URL) ctx.waitUntil(fetch(env.BOT_URL.replace(/\/+$/, "") + "/healthz").then(() => {}, () => {}));
-    } else {
-      ctx.waitUntil(cleanup(env));
-    }
+  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(cleanup(env));
   },
 } satisfies ExportedHandler<Env>;

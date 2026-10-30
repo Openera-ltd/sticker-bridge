@@ -1,0 +1,22 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "sticker-bridge-bot",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-08-15",
+  "compatibility_flags": ["nodejs_compat"],
+  // Reachable for /healthz, and /run + /debug with the bot secret.
+  "workers_dev": true,
+  "browser": { "binding": "BROWSER" },
+  "services": [{ "binding": "API", "service": "sticker-bridge-api" }],
+  "kv_namespaces": [{ "binding": "STATE", "id": "296c138399f0420d9f79d64516f1fb7c" }],
+  "vars": {
+    "MAX_CHATS": "10",
+    "SEND_REPLIES": "false",
+    "INBOX_URL": "https://www.tiktok.com/messages?lang=en"
+  },
+  // Every 2 minutes. Workers Paid includes 10 browser-hours a month, then $0.09/hour;
+  // a ~20 s run every 2 min is about 70 hours/month (~$5 extra). */5 halves that.
+  "triggers": { "crons": ["*/2 * * * *"] },
+  "observability": { "enabled": true }
+  // Secrets: BOT_SECRET (same as the API's). Optional TIKTOK_COOKIES (first-time login).
+}

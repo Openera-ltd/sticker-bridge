@@ -6,7 +6,23 @@ import { createServer, type Server } from "node:http";
 import { existsSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { Bot, type Config } from "./main.ts";
+import puppeteer from "puppeteer-core";
+import { runPass, type Api, type PassConfig } from "./run.ts";
+
+/** Runs one pass in a local Chromium, the same way the Cloudflare worker does with its hosted browser. */
+class Bot {
+  private browser: Awaited<ReturnType<typeof puppeteer.launch>> | null = null;
+  constructor(private c: PassConfig & { apiBase: string }) {}
+  run() {
+    const api: Api = (path, init = {}) =>
+      fetch(this.c.apiBase + path, { ...init, headers: { authorization: "Bearer s3cret", "content-type": "application/json" } });
+    return runPass(async () => (this.browser ??= await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-sandbox"] })), this.c, api);
+  }
+  async closeBrowser() {
+    await this.browser?.close();
+  }
+}
+type Config = PassConfig & { apiBase: string };
 
 const CHROME = process.env.CHROME_PATH ?? "/opt/pw-browsers/chromium-1243/chrome-linux64/chrome";
 
@@ -88,8 +104,8 @@ beforeAll(async () => {
 afterAll(() => { tiktok?.close(); api?.close(); });
 
 const cfg = (): Config => ({
-  apiBase: apiUrl, botSecret: "s3cret", initialCookies: JSON.stringify([{ name: "sessionid", value: "first-login", domain: "localhost" }]),
-  chromePath: CHROME, inboxUrl: `${tiktokUrl}/messages?lang=en`, pollSeconds: 60, maxChats: 10, sendReplies: true,
+  apiBase: apiUrl, initialCookies: JSON.stringify([{ name: "sessionid", value: "first-login", domain: "localhost" }]),
+  inboxUrl: `${tiktokUrl}/messages?lang=en`, maxChats: 10, sendReplies: true,
 });
 
 describe.skipIf(!existsSync(CHROME))("bot in a real browser", () => {

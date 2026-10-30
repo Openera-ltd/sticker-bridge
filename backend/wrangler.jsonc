@@ -6,7 +6,7 @@
   "workers_dev": false,
   // The only address the app talks to. Cloudflare creates the DNS record and certificate.
   "routes": [{ "pattern": "api.sticker.openera.tech", "custom_domain": true }],
-  "vars": { "BOT_USERNAME": "stickerbridge", "BOT_URL": "https://sticker-bridge-bot.onrender.com" },
+  "vars": { "BOT_USERNAME": "stickerbridge" },
   "d1_databases": [
     {
       "binding": "DB",
@@ -16,8 +16,8 @@
     }
   ],
   "r2_buckets": [{ "binding": "FILES", "bucket_name": "stiker-bridge" }],
-  // Daily clean-up (stickers older than 30 days), and a ping every 10 min that keeps the Render bot awake.
-  "triggers": { "crons": ["17 3 * * *", "*/10 * * * *"] },
+  // Daily clean-up: stickers older than 30 days, old codes.
+  "triggers": { "crons": ["17 3 * * *"] },
   "observability": { "enabled": true }
   // Secrets (set with `wrangler secret put`): BOT_SECRET, ADMIN_SECRET
 }
