@@ -11,8 +11,9 @@ export const CHAT_SELECTOR = '[data-e2e*="chat-main"], [class*="ChatMain"], [cla
 export const BUBBLE_SELECTOR = '[data-e2e*="chat-item"], [class*="ChatItem"], [class*="MessageItem"]';
 
 export async function readInbox(page: Page, inboxUrl: string, maxChats: number): Promise<SeenChat[]> {
-  await page.goto(inboxUrl, { waitUntil: "networkidle2", timeout: 45_000 });
-  await page.waitForSelector(ROW_SELECTOR, { timeout: 20_000 });
+  // TikTok keeps network requests open, so wait for the page structure, then for the chat list.
+  await page.goto(inboxUrl, { waitUntil: "domcontentloaded", timeout: 45_000 });
+  await page.waitForSelector(ROW_SELECTOR, { timeout: 30_000 });
   const count = Math.min(maxChats, await page.$$eval(ROW_SELECTOR, (els) => els.length));
   const chats: SeenChat[] = [];
 
