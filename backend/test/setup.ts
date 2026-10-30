@@ -1,0 +1,14 @@
+import { applyD1Migrations } from "cloudflare:test";
+import { env } from "cloudflare:workers";
+
+declare global {
+  namespace Cloudflare {
+    interface Env {
+      DB: D1Database;
+      FILES: R2Bucket;
+      TEST_MIGRATIONS: import("cloudflare:test").D1Migration[];
+    }
+  }
+}
+
+await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);

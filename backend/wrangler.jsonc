@@ -1,0 +1,23 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "sticker-bridge-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-15",
+  "workers_dev": false,
+  // The only address the app talks to. Cloudflare creates the DNS record and certificate.
+  "routes": [{ "pattern": "api.sticker.openera.tech", "custom_domain": true }],
+  "vars": { "BOT_USERNAME": "stickerbridge" },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "sticker-bridge",
+      "database_id": "70820e3d-3dc9-47d6-9054-d7049d477521",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [{ "binding": "FILES", "bucket_name": "stiker-bridge" }],
+  // Daily clean-up: stickers older than 30 days, old codes.
+  "triggers": { "crons": ["17 3 * * *"] },
+  "observability": { "enabled": true }
+  // Secrets (set with `wrangler secret put`): BOT_SECRET, ADMIN_SECRET
+}
