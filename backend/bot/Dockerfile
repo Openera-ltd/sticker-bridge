@@ -7,7 +7,8 @@ COPY package.json package-lock.json .npmrc ./
 RUN npm ci --omit=dev --no-audit --no-fund --legacy-peer-deps
 
 # Chrome headless shell matching puppeteer-core, with the system libraries it needs.
-RUN npx --yes @puppeteer/browsers@2.13.2 install chrome-headless-shell@155.0.8059.39 --path /opt/chrome --install-deps \
+RUN apt-get update \
+ && npx --yes @puppeteer/browsers@2.13.2 install chrome-headless-shell@155.0.8059.39 --path /opt/chrome --install-deps \
  && ln -s "$(find /opt/chrome -type f -name chrome-headless-shell | head -1)" /usr/local/bin/chrome-headless-shell \
  && apt-get install -y --no-install-recommends fonts-noto-color-emoji ca-certificates \
  && rm -rf /var/lib/apt/lists/* /root/.npm
