@@ -47,7 +47,7 @@ export function configFromEnv(env = process.env): LiveConfig {
     requestsEveryMs: min(env.REQUESTS_EVERY_MIN, 2),
     staleAfterMs: min(env.STALE_AFTER_MIN, 20),
     restartEveryMs: min(env.RESTART_EVERY_MIN, 180),
-    memSoftMB: Number(env.MEM_SOFT_MB ?? 340),
+    memSoftMB: Number(env.MEM_SOFT_MB ?? 360),
     memHardMB: Number(env.MEM_HARD_MB ?? 430),
   };
 }
@@ -265,6 +265,7 @@ export class LiveInbox {
   memMB: number | null = null;
   memPeakMB = 0;
   private trimming = false;
+  private lastTrimAt = 0;
   async watchMemory() {
     const mem = await containerMemMB();
     const used = mem?.usedMB ?? null;
@@ -275,8 +276,10 @@ export class LiveInbox {
       this.counts.memRestarts++;
       return void this.restart(`memory ${used} MB`);
     }
-    if (used >= this.cfg.memSoftMB && this.cdp) {
+    // At most every 3 minutes: freeing memory costs CPU, and the box only has 0.1 of one.
+    if (used >= this.cfg.memSoftMB && this.cdp && Date.now() - this.lastTrimAt > 180_000) {
       this.trimming = true;
+      this.lastTrimAt = Date.now();
       try {
         await this.cdp.send("Memory.simulatePressureNotification", { level: "critical" }).catch(() => {});
         await this.cdp.send("HeapProfiler.collectGarbage").catch(() => {});
