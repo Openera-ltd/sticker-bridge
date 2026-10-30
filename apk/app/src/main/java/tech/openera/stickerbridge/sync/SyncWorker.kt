@@ -34,6 +34,8 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
                 g.updates.check()?.let { g.notifier.updateAvailable(it.versionName) }
             }
         }
+        // Short intervals: each check books the next one (Android's repeating jobs can't go below 15 min).
+        if (!result.signedOut) SyncScheduler.scheduleNext(applicationContext, prefs)
         return when {
             result.signedOut -> Result.success()
             result.error != null -> Result.retry()
@@ -45,6 +47,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
 object SyncScheduler {
     private const val PERIODIC = "sticker-sync"
     private const val NOW = "sticker-sync-now"
+    private const val NEXT = "sticker-sync-next"
 
     private fun constraints(s: AppSettings) = Constraints.Builder()
         .setRequiredNetworkType(if (s.wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED)
@@ -54,12 +57,25 @@ object SyncScheduler {
     fun apply(context: Context, s: AppSettings, connected: Boolean) {
         val wm = WorkManager.getInstance(context)
         if (!s.autoSync || !connected) {
-            wm.cancelUniqueWork(PERIODIC); return
+            wm.cancelUniqueWork(PERIODIC); wm.cancelUniqueWork(NEXT); return
         }
         val req = PeriodicWorkRequestBuilder<SyncWorker>(s.syncIntervalMin.toLong().coerceAtLeast(15), TimeUnit.MINUTES)
             .setConstraints(constraints(s))
             .build()
+        // The repeating 15-minute job is the safety net; shorter intervals chain one check to the next.
         wm.enqueueUniquePeriodicWork(PERIODIC, ExistingPeriodicWorkPolicy.UPDATE, req)
+        if (s.syncIntervalMin < 15) scheduleNext(context, s, replace = true) else wm.cancelUniqueWork(NEXT)
+    }
+
+    /** Books the next quick check [AppSettings.syncIntervalMin] minutes from now (1 or 5). */
+    fun scheduleNext(context: Context, s: AppSettings, replace: Boolean = false) {
+        if (!s.autoSync || s.syncIntervalMin >= 15) return
+        val req = OneTimeWorkRequestBuilder<SyncWorker>()
+            .setInitialDelay(s.syncIntervalMin.toLong(), TimeUnit.MINUTES)
+            .setConstraints(constraints(s))
+            .build()
+        WorkManager.getInstance(context)
+            .enqueueUniqueWork(NEXT, if (replace) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.APPEND_OR_REPLACE, req)
     }
 
     fun runNow(context: Context, s: AppSettings) {

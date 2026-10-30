@@ -19,7 +19,7 @@ enum class ThemeMode { System, Light, Dark }
 data class AppSettings(
     val autoSync: Boolean = true,
     /** Minutes between background checks. Android's minimum is 15. */
-    val syncIntervalMin: Int = 30,
+    val syncIntervalMin: Int = 5,
     val wifiOnly: Boolean = false,
     val notifyNewStickers: Boolean = true,
     val outline: Boolean = false,
@@ -31,7 +31,7 @@ data class AppSettings(
 ) {
     companion object {
         const val DEFAULT_PACK_NAME = "My TikTok Stickers"
-        val INTERVALS = listOf(15, 30, 60, 180, 720)
+        val INTERVALS = listOf(1, 5, 15, 30, 60, 180)
     }
 }
 
@@ -73,7 +73,7 @@ class SettingsRepo(private val context: Context) {
     val settings: Flow<AppSettings> = context.store.data.map { p ->
         AppSettings(
             autoSync = p[K.autoSync] ?: true,
-            syncIntervalMin = p[K.interval] ?: 30,
+            syncIntervalMin = p[K.interval] ?: 5,
             wifiOnly = p[K.wifiOnly] ?: false,
             notifyNewStickers = p[K.notify] ?: true,
             outline = p[K.outline] ?: false,
@@ -111,7 +111,7 @@ class SettingsRepo(private val context: Context) {
         context.store.edit { p ->
             val cur = AppSettings(
                 autoSync = p[K.autoSync] ?: true,
-                syncIntervalMin = p[K.interval] ?: 30,
+                syncIntervalMin = p[K.interval] ?: 5,
                 wifiOnly = p[K.wifiOnly] ?: false,
                 notifyNewStickers = p[K.notify] ?: true,
                 outline = p[K.outline] ?: false,
@@ -123,7 +123,7 @@ class SettingsRepo(private val context: Context) {
             )
             val n = block(cur)
             p[K.autoSync] = n.autoSync
-            p[K.interval] = n.syncIntervalMin.coerceAtLeast(15)
+            p[K.interval] = n.syncIntervalMin.coerceAtLeast(1)
             p[K.wifiOnly] = n.wifiOnly
             p[K.notify] = n.notifyNewStickers
             p[K.outline] = n.outline

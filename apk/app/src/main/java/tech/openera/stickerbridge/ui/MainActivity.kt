@@ -50,6 +50,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
@@ -148,6 +149,11 @@ private fun Home(vm: AppViewModel, startTab: String?) {
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         vm.refreshWhatsApp()
         vm.syncNow()
+    }
+    // Quiet checks every 15 s, only while the app is on screen.
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(lifecycle) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) { vm.watchWhileOpen() }
     }
     LaunchedEffect(packs) { vm.refreshWhatsApp() }
 

@@ -5,7 +5,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 
 data class SyncResult(
@@ -35,8 +37,12 @@ class SyncRepository(
     private val _status = MutableStateFlow<SyncStatus>(SyncStatus.Idle)
     val status: StateFlow<SyncStatus> = _status.asStateFlow()
 
-    suspend fun sync(): SyncResult = lock.withLock {
-        _status.value = SyncStatus.Running
+    /**
+     * [quiet] = the frequent background check while the app is open: no spinner, and errors stay
+     * silent (it tries again in a few seconds). The result only shows if something arrived.
+     */
+    suspend fun sync(quiet: Boolean = false): SyncResult = lock.withLock {
+        if (!quiet) _status.value = SyncStatus.Running
         val result = runCatching { doSync() }.getOrElse { e ->
             when {
                 e is ApiException && e.code == 401 -> {
@@ -52,7 +58,7 @@ class SyncRepository(
                 }
             }
         }
-        _status.value = SyncStatus.Done(result, clock())
+        if (!quiet || result.added > 0 || result.signedOut) _status.value = SyncStatus.Done(result, clock())
         result
     }
 
@@ -60,36 +66,48 @@ class SyncRepository(
         val session = settings.currentSession()
         val token = session.token ?: return@withContext SyncResult(error = "Not connected")
         val prefs = settings.current()
-        val known = store.state.value.stickers.map { it.id }.toHashSet()
+        val known: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet<String>().apply { addAll(store.state.value.stickers.map { it.id }) }
         var cursor = session.cursor
-        val fresh = mutableListOf<LocalSticker>()
-        var skipped = 0
+        val added = java.util.concurrent.atomic.AtomicInteger()
+        val skipped = java.util.concurrent.atomic.AtomicInteger()
+        val parallel = kotlinx.coroutines.sync.Semaphore(PARALLEL)
 
         var pages = 0
         while (pages++ < MAX_PAGES) {
             val page = api.stickers(token, cursor)
-            for (item in page.items) {
-                if (item.id in known || fresh.any { it.id == item.id }) continue
-                val saved = runCatching { save(token, item, prefs.outline, prefs.defaultEmoji) }
-                    .onFailure { e ->
-                        // A sticker that couldn't be converted: report it so formats can be supported.
-                        if (e !is java.io.IOException) io.sentry.Sentry.captureException(e) { it.setTag("sticker_id", item.id) }
+            val todo = page.items.distinctBy { it.id }.filter { it.id !in known }
+            // A few at a time, and each sticker shows up the moment it's ready (not after the whole batch).
+            kotlinx.coroutines.coroutineScope {
+                todo.forEach { item ->
+                    launch {
+                        parallel.withPermit {
+                            val saved = runCatching { save(token, item, prefs.outline, prefs.defaultEmoji) }
+                                .onFailure { e ->
+                                    // A sticker that couldn't be converted: report it so formats can be supported.
+                                    if (e !is java.io.IOException) io.sentry.Sentry.captureException(e) { it.setTag("sticker_id", item.id) }
+                                }
+                                .getOrNull()
+                            if (saved == null) {
+                                skipped.incrementAndGet()
+                            } else {
+                                store.mutate(prefs.packName, prefs.outline) { list -> if (list.any { it.id == saved.id }) list else list + saved }
+                                known += saved.id
+                                added.incrementAndGet()
+                            }
+                        }
                     }
-                    .getOrNull()
-                if (saved == null) skipped++ else fresh += saved
+                }
             }
+            if (todo.isNotEmpty()) refreshTrays(prefs.packName)
             val next = page.cursor
             val done = page.items.isEmpty() || next == null || next == cursor
             if (next != null) cursor = next
+            settings.saveSync(cursor, clock()) // progress is kept even if the phone stops us mid-way
             if (done) break
         }
 
-        if (fresh.isNotEmpty()) {
-            store.mutate(prefs.packName, prefs.outline) { it + fresh }
-            refreshTrays(prefs.packName)
-        }
         settings.saveSync(cursor, clock())
-        SyncResult(added = fresh.size, skipped = skipped)
+        SyncResult(added = added.get(), skipped = skipped.get())
     }
 
     private suspend fun save(token: String, item: RemoteSticker, outline: Boolean, defaultEmoji: String): LocalSticker? {
@@ -176,5 +194,7 @@ class SyncRepository(
 
     companion object {
         const val MAX_PAGES = 10
+        /** Stickers downloaded and converted at the same time. */
+        const val PARALLEL = 3
     }
 }

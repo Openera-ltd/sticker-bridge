@@ -132,6 +132,7 @@ class ScreensTest {
     }
 
     @Test fun intervalLabels() {
+        assertEquals("1 minute", intervalLabel(1))
         assertEquals("15 minutes", intervalLabel(15))
         assertEquals("1 hour", intervalLabel(60))
         assertEquals("12 hours", intervalLabel(720))

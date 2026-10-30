@@ -125,8 +125,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { syncNowInternal() }
     }
 
-    private suspend fun syncNowInternal() {
-        val r = g.sync.sync()
+    /** While the app is open: check quietly every few seconds so new stickers appear right away. */
+    suspend fun watchWhileOpen() {
+        while (true) {
+            kotlinx.coroutines.delay(15_000)
+            if (session.value?.connected == true) syncNowInternal(quiet = true)
+        }
+    }
+
+    private suspend fun syncNowInternal(quiet: Boolean = false) {
+        val r = g.sync.sync(quiet)
         if (r.added > 0) WhatsApp.notifyChanged(getApplication())
         refreshWhatsApp()
     }

@@ -220,6 +220,7 @@ fun SettingsTab(
 }
 
 fun intervalLabel(min: Int): String = when {
+    min == 1 -> "1 minute"
     min < 60 -> "$min minutes"
     min == 60 -> "1 hour"
     else -> "${min / 60} hours"
