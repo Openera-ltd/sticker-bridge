@@ -60,9 +60,12 @@ export async function readInbox(page: Page, inboxUrl: string, maxChats: number):
  * Opens that folder and accepts each request, so their chat moves to the main inbox.
  * Returns how many were accepted.
  */
-export async function acceptRequests(page: Page, inboxUrl: string, max: number): Promise<number> {
-  await page.goto(inboxUrl, { waitUntil: "domcontentloaded", timeout: 45_000 });
-  await page.waitForSelector(ROW_SELECTOR, { timeout: 30_000 }).catch(() => {});
+export async function acceptRequests(page: Page, inboxUrl: string, max: number, opts: { inPlace?: boolean } = {}): Promise<number> {
+  // In place = the inbox is already open (the live bot); otherwise load it first.
+  if (!opts.inPlace) {
+    await page.goto(inboxUrl, { waitUntil: "domcontentloaded", timeout: 45_000 });
+    await page.waitForSelector(ROW_SELECTOR, { timeout: 30_000 }).catch(() => {});
+  }
   const clickByText = (pattern: string, tags: string) =>
     page.evaluate(
       (pat, sel) => {

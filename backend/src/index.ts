@@ -11,6 +11,8 @@ export interface Env {
   BOT_SECRET: string;
   /** For publishing app updates and changing config. */
   ADMIN_SECRET: string;
+  /** The live bot on Render; pinged so the free instance never sleeps. */
+  BOT_URL?: string;
 }
 
 const CODE_TTL_MS = 10 * 60_000;
@@ -18,6 +20,7 @@ const STICKER_TTL_MS = 30 * 24 * 60 * 60_000;
 const MAX_STICKER_BYTES = 5 * 1024 * 1024;
 const MAX_CODES_PER_HOUR = 6;
 const PAGE = 50;
+export const KEEP_AWAKE_CRON = "*/10 * * * *";
 const CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"; // no 0/O/1/I/L
 
 // ---------- small helpers ----------
@@ -422,7 +425,12 @@ export default {
     }
   },
 
-  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(cleanup(env));
+  async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext) {
+    if (event.cron === KEEP_AWAKE_CRON) {
+      // Render's free plan sleeps after 15 idle minutes; this keeps the live bot awake.
+      if (env.BOT_URL) ctx.waitUntil(fetch(env.BOT_URL.replace(/\/+$/, "") + "/healthz").then(() => {}, () => {}));
+    } else {
+      ctx.waitUntil(cleanup(env));
+    }
   },
 } satisfies ExportedHandler<Env>;
