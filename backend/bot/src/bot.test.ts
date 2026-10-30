@@ -10,20 +10,30 @@ import { Bot, type Config } from "./main.ts";
 
 const CHROME = process.env.CHROME_PATH ?? "/opt/pw-browsers/chromium-1243/chrome-linux64/chrome";
 
-const INBOX = `<!doctype html><html><body>
+let accepted = false;
+const inbox = () => `<!doctype html><html><body>
 <div id="list">
+  <div class="requests-entry" onclick="showRequests()"><span>Message requests</span></div>
   <div data-e2e="chat-list-item" onclick="openChat('mia.draws')">Mia</div>
   <div data-e2e="chat-list-item" onclick="openChat('sam_1')">Sam</div>
+  ${accepted ? `<div data-e2e="chat-list-item" onclick="openChat('new.person')">New</div>` : ""}
 </div>
 <main data-e2e="chat-main" id="main"></main>
 <script>
   const chats = {
     'mia.draws': '<div data-e2e="chat-item"><a href="/@mia.draws"><img width="32" height="32" src="https://p16-sign.tiktokcdn.com/avatar.jpg"></a>my code SB-7KQ4MZ</div>'
       + '<div data-e2e="chat-item"><img width="120" height="120" src="https://p16-sign.tiktokcdn.com/sticker/one.webp?sig=a"></div>',
+    'new.person': '<div data-e2e="chat-item">SB-ABCDEF</div>',
     'sam_1': '<div data-e2e="chat-item"><a href="/@sam_1">Sam</a></div>'
       + '<div data-e2e="chat-item"><img width="140" height="140" src="https://p16-sign.tiktokcdn.com/sticker/two.gif?sig=b"></div>'
       + '<div data-e2e="chat-item">lol</div>',
   };
+  function showRequests() {
+    document.getElementById('list').innerHTML = ${accepted ? "''" : `'<div data-e2e="chat-list-item" onclick="openRequest()">new.person</div>'`};
+  }
+  function openRequest() {
+    document.getElementById('main').innerHTML = '<p>new.person wants to send you a message</p><button onclick="fetch(\\'/accept\\', {method:\\'POST\\'}).then(() => { document.getElementById(\\'list\\').innerHTML = \\'\\'; })">Accept</button><button>Delete</button>';
+  }
   function openChat(u) {
     history.replaceState(null, '', '/messages?u=' + (u === 'mia.draws' ? '7012345678901234567' : ''));
     document.getElementById('main').innerHTML = '<header><a href="/@' + u + '">@' + u + '</a></header>' + chats[u]
@@ -51,8 +61,9 @@ beforeAll(async () => {
     if (req.url?.startsWith("/messages")) {
       cookiesSeen = req.headers.cookie ?? "";
       res.writeHead(200, { "content-type": "text/html" });
-      return res.end(INBOX);
+      return res.end(inbox());
     }
+    if (req.url === "/accept") { accepted = true; return res.end("ok"); }
     if (req.url === "/typed") { typed.push(await body(req)); return res.end("ok"); }
     res.writeHead(404); res.end();
   });
@@ -87,7 +98,9 @@ describe.skipIf(!existsSync(CHROME))("bot in a real browser", () => {
     const r = await bot.run();
     await bot.closeBrowser();
     expect(r.error).toBeUndefined();
-    expect(r).toMatchObject({ ok: true, loggedIn: true, chats: 2, sent: 3 });
+    expect(r).toMatchObject({ ok: true, loggedIn: true, accepted: 1, chats: 3, sent: 4 });
+    // The accepted request's code reached the API in the same run.
+    expect(posted.find((m) => m.text === "SB-ABCDEF")?.sender.username).toBe("new.person");
     expect(cookiesSeen).toContain("sessionid=first-login");
 
     const code = posted.find((m) => m.type === "text");
@@ -97,7 +110,7 @@ describe.skipIf(!existsSync(CHROME))("bot in a real browser", () => {
     expect(stickers[1]).toMatchObject({ animated: true, sender: { id: "u_sam_1" } }); // no id on the page: username fallback
     expect(stickers.every((s) => !s.url.includes("avatar"))).toBe(true);
 
-    expect(typed).toEqual(["Connected", "Got it", "Got it"]);
+    expect(typed).toEqual(["Connected", "Got it", "Got it", "Connected"]);
     expect(savedState.cookies.some((c: any) => c.name === "sessionid" && c.value === "first-login")).toBe(true);
   }, 90_000);
 

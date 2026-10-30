@@ -8,7 +8,7 @@
  */
 import { createServer } from "node:http";
 import puppeteer, { type Browser, type CookieData } from "puppeteer-core";
-import { readInbox, reply } from "./inbox.ts";
+import { acceptRequests, readInbox, reply } from "./inbox.ts";
 import { parseCookies, toInbox } from "./messages.ts";
 
 export interface Config {
@@ -40,6 +40,7 @@ export interface RunReport {
   at: string;
   loggedIn: boolean;
   chats: number;
+  accepted: number;
   sent: number;
   results: Record<string, number>;
   error?: string;
@@ -158,7 +159,7 @@ export class Bot {
 
   private async doRun(): Promise<RunReport> {
     const started = Date.now();
-    const report: RunReport = { ok: false, at: new Date().toISOString(), loggedIn: false, chats: 0, sent: 0, results: {}, ms: 0 };
+    const report: RunReport = { ok: false, at: new Date().toISOString(), loggedIn: false, chats: 0, accepted: 0, sent: 0, results: {}, ms: 0 };
     const cookies = await this.loadCookies();
     if (!cookies.length) {
       report.error = "No TikTok login yet (set TIKTOK_COOKIES)";
@@ -175,6 +176,8 @@ export class Bot {
       page.on("request", (r) => (["media", "font"].includes(r.resourceType()) ? r.abort() : r.continue()));
       await browser.setCookie(...cookies);
 
+      // New people's first messages wait in "Message requests": accept them first.
+      report.accepted = await acceptRequests(page, this.cfg.inboxUrl, this.cfg.maxChats).catch(() => 0);
       const chats = await readInbox(page, this.cfg.inboxUrl, this.cfg.maxChats);
       report.loggedIn = true;
       report.chats = chats.length;

@@ -54,6 +54,49 @@ export async function readInbox(page: Page, inboxUrl: string, maxChats: number):
   return chats;
 }
 
+/**
+ * Messages from people who don't follow @stickerbridge land in "Message requests".
+ * Opens that folder and accepts each request, so their chat moves to the main inbox.
+ * Returns how many were accepted.
+ */
+export async function acceptRequests(page: Page, inboxUrl: string, max: number): Promise<number> {
+  await page.goto(inboxUrl, { waitUntil: "domcontentloaded", timeout: 45_000 });
+  await page.waitForSelector(ROW_SELECTOR, { timeout: 30_000 }).catch(() => {});
+  const clickByText = (pattern: string, tags: string) =>
+    page.evaluate(
+      (pat, sel) => {
+        const re = new RegExp(pat, "i");
+        // The smallest visible element whose own text matches, so we click the button/row, not a container.
+        const hits = [...document.querySelectorAll(sel)].filter((el) => {
+          const t = (el as HTMLElement).innerText?.trim() ?? "";
+          const r = el.getBoundingClientRect();
+          return re.test(t) && t.length < 60 && r.width > 0 && r.height > 0;
+        });
+        hits.sort((a, b) => (a as HTMLElement).innerText.length - (b as HTMLElement).innerText.length);
+        const el = hits[0] as HTMLElement | undefined;
+        el?.click();
+        return Boolean(el);
+      },
+      pattern,
+      tags,
+    );
+
+  if (!(await clickByText("^message requests?\\b|^requests?\\b", '[data-e2e*="request"], a, button, div, span, p'))) return 0;
+  await new Promise((r) => setTimeout(r, 1500));
+
+  let accepted = 0;
+  for (let i = 0; i < max; i++) {
+    const rows = await page.$$(ROW_SELECTOR);
+    if (!rows.length) break;
+    await rows[0].click();
+    await new Promise((r) => setTimeout(r, 1200));
+    if (!(await clickByText("^accept$", 'button, [role="button"], div, span'))) break;
+    accepted++;
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+  return accepted;
+}
+
 /** Types a reply into the open chat. */
 export async function reply(page: Page, text: string): Promise<void> {
   const box = await page.$('[contenteditable="true"], .public-DraftEditor-content, textarea');
