@@ -38,11 +38,18 @@ class SyncRepository(
     suspend fun sync(): SyncResult = lock.withLock {
         _status.value = SyncStatus.Running
         val result = runCatching { doSync() }.getOrElse { e ->
-            if (e is ApiException && e.code == 401) {
-                settings.clearSession()
-                SyncResult(error = "Your TikTok connection ended. Connect again.", signedOut = true)
-            } else {
-                SyncResult(error = e.message ?: "Sync failed")
+            when {
+                e is ApiException && e.code == 401 -> {
+                    settings.clearSession()
+                    SyncResult(error = "Your TikTok connection ended. Connect again.", signedOut = true)
+                }
+                // Offline or timeouts: normal on phones, not worth reporting.
+                e is java.io.IOException && e !is ApiException -> SyncResult(error = "Couldn't sync. Check your connection.")
+                else -> {
+                    // Technical details go to Sentry only; people see a plain message.
+                    io.sentry.Sentry.captureException(e)
+                    SyncResult(error = "Couldn't sync right now. Try again soon.")
+                }
             }
         }
         _status.value = SyncStatus.Done(result, clock())
@@ -63,7 +70,12 @@ class SyncRepository(
             val page = api.stickers(token, cursor)
             for (item in page.items) {
                 if (item.id in known || fresh.any { it.id == item.id }) continue
-                val saved = runCatching { save(token, item, prefs.outline, prefs.defaultEmoji) }.getOrNull()
+                val saved = runCatching { save(token, item, prefs.outline, prefs.defaultEmoji) }
+                    .onFailure { e ->
+                        // A sticker that couldn't be converted: report it so formats can be supported.
+                        if (e !is java.io.IOException) io.sentry.Sentry.captureException(e) { it.setTag("sticker_id", item.id) }
+                    }
+                    .getOrNull()
                 if (saved == null) skipped++ else fresh += saved
             }
             val next = page.cursor

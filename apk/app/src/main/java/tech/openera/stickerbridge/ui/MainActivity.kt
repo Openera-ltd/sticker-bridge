@@ -191,7 +191,7 @@ private fun Home(vm: AppViewModel, startTab: String?) {
     val s = settings ?: return
     val ses = session ?: return
 
-    HomeFrame(tab, { tab = it }, snackbar) {
+    HomeFrame(tab, { tab = it; io.sentry.Sentry.addBreadcrumb("Opened $it tab", "navigation") }, snackbar) {
             when (tab) {
                 "packs" -> PacksTab(packs, g.store.dir, installed, wa, banner, onAdd)
                 "settings" -> SettingsTab(

@@ -24,12 +24,18 @@ android {
         applicationId = "tech.openera.stickerbridge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.0.2"
+        versionCode = 4
+        versionName = "1.0.3"
 
         // The ONLY server the app talks to. Everything goes through it.
         buildConfigField("String", "API_BASE", "\"https://api.sticker.openera.tech/\"")
         buildConfigField("String", "BOT_USERNAME", "\"stickerbridge\"")
+
+        // Sentry (crashes, freezes, performance). Project: manwah-lobby/sticker-bridge-android.
+        manifestPlaceholders["sentryDsn"] =
+            "https://e5e229bdd428917e708c2bd51a755aec@o4512164490444800.ingest.de.sentry.io/4512346770112592"
+        manifestPlaceholders["sentryEnabled"] = "false"
+        manifestPlaceholders["sentryEnvironment"] = "live"
     }
 
     flavorDimensions += "mode"
@@ -44,6 +50,7 @@ android {
             applicationIdSuffix = ".demo"
             versionNameSuffix = "-demo"
             buildConfigField("boolean", "DEMO", "true")
+            manifestPlaceholders["sentryEnvironment"] = "demo"
         }
     }
 
@@ -65,6 +72,8 @@ android {
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
+            // Only published builds report to Sentry; tests and debug builds stay silent.
+            manifestPlaceholders["sentryEnabled"] = "true"
         }
     }
 
@@ -108,6 +117,10 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("io.coil-kt:coil-gif:2.7.0") // plays animated stickers in the app
+    // Sentry: crashes, ANRs, app start, slow/frozen frames, taps, and API call timing
+    implementation("io.sentry:sentry-android:8.60.0")
+    implementation("io.sentry:sentry-compose-android:8.60.0")
+    implementation("io.sentry:sentry-okhttp:8.60.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     testImplementation("junit:junit:4.13.2")

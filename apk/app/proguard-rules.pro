@@ -18,3 +18,7 @@
 -dontwarn org.conscrypt.**
 -dontwarn org.bouncycastle.**
 -dontwarn org.openjsse.**
+
+# Readable Sentry stack traces without uploading mapping files: shrink, but keep names and line numbers.
+-dontobfuscate
+-keepattributes SourceFile,LineNumberTable

@@ -50,6 +50,8 @@ class HttpApi(
     private val http: OkHttpClient = (client?.newBuilder() ?: OkHttpClient.Builder())
         .addInterceptor(guard)
         .addNetworkInterceptor(guard)
+        // Times each API call in Sentry performance traces (no bodies or headers are sent).
+        .addInterceptor(io.sentry.okhttp.SentryOkHttpInterceptor())
         // The API never redirects. Refusing redirects means a hijacked response can't send us elsewhere.
         .followRedirects(false)
         .followSslRedirects(false)

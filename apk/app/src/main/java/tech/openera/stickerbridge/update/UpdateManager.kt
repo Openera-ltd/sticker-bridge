@@ -83,11 +83,13 @@ class UpdateManager(
             val problem = verify(file, release)
             if (problem != null) {
                 file.delete()
+                io.sentry.Sentry.captureMessage("Update rejected: $problem (${release.versionName})")
                 _state.value = UpdateState.Failed(problem, release); return
             }
             _state.value = UpdateState.Installing(release)
             install(file)
         } catch (e: Exception) {
+            if (e !is java.io.IOException) io.sentry.Sentry.captureException(e)
             _state.value = UpdateState.Failed("Download failed. Check your connection.", release)
         }
     }
@@ -129,6 +131,11 @@ class UpdateManager(
     }
 
     fun onInstallResult(status: Int, message: String?) {
+        if (status != PackageInstaller.STATUS_SUCCESS && status != PackageInstaller.STATUS_PENDING_USER_ACTION &&
+            status != PackageInstaller.STATUS_FAILURE_ABORTED
+        ) {
+            io.sentry.Sentry.captureMessage("Update install failed: status $status ${message ?: ""}")
+        }
         if (status != PackageInstaller.STATUS_SUCCESS && status != PackageInstaller.STATUS_PENDING_USER_ACTION) {
             val release = (state.value as? UpdateState.Installing)?.release
             _state.value = if (status == PackageInstaller.STATUS_FAILURE_ABORTED) {

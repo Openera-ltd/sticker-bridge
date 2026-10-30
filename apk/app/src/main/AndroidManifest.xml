@@ -49,6 +49,19 @@
             android:name=".update.InstallResultReceiver"
             android:exported="false" />
 
+        <!-- Sentry: what breaks and how fast the app is. No personal data, no screenshots. -->
+        <meta-data android:name="io.sentry.dsn" android:value="${sentryDsn}" />
+        <meta-data android:name="io.sentry.enabled" android:value="${sentryEnabled}" />
+        <meta-data android:name="io.sentry.environment" android:value="${sentryEnvironment}" />
+        <meta-data android:name="io.sentry.send-default-pii" android:value="false" />
+        <meta-data android:name="io.sentry.attach-screenshot" android:value="false" />
+        <meta-data android:name="io.sentry.attach-view-hierarchy" android:value="false" />
+        <meta-data android:name="io.sentry.anr.enable" android:value="true" />
+        <meta-data android:name="io.sentry.traces.sample-rate" android:value="0.3" />
+        <meta-data android:name="io.sentry.traces.user-interaction.enable" android:value="true" />
+        <meta-data android:name="io.sentry.performance-v2.enable" android:value="true" />
+        <meta-data android:name="io.sentry.traces.frames-tracking" android:value="true" />
+
         <provider
             android:name="androidx.startup.InitializationProvider"
             android:authorities="${applicationId}.androidx-startup"

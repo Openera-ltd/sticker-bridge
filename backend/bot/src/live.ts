@@ -59,7 +59,7 @@ const CHROME_ARGS = [
 ];
 
 /** Things the messages tab never needs. Blocking them saves most of the CPU and memory. */
-const BLOCKED_TYPES = new Set(["image", "media", "font", "texttrack", "eventsource", "manifest", "other"]);
+const BLOCKED_TYPES = new Set(["image", "media", "font", "stylesheet", "texttrack", "eventsource", "manifest", "other"]);
 const BLOCKED_HOSTS = [
   /(^|\.)webcast\./, /(^|\.)mon[a-z0-9-]*\.tiktokv/, /(^|\.)mcs[a-z0-9-]*\.tiktok/, /analytics/, /doubleclick/,
   /google/, /facebook/, /(^|\.)log[a-z0-9-]*\.tiktok/, /\.ttwstatic\.com\/.*(live|shop)/i, /tiktokcdn[^/]*\/.*\.(mp4|m3u8|webm)/,
@@ -147,7 +147,11 @@ export class LiveInbox {
 
     this.log("loading tiktok messages (one tab, images/media blocked)…");
     await page.goto(this.cfg.inboxUrl, { waitUntil: "domcontentloaded", timeout: this.cfg.loadTimeoutMs });
-    await page.waitForSelector(ROW_SELECTOR, { timeout: this.cfg.loadTimeoutMs });
+    // On a slow CPU the chat list can take ages to draw while message data already flows.
+    // Data flowing = live; the list only matters for accepting requests, which waits for it.
+    const drawn = await page.waitForSelector(ROW_SELECTOR, { timeout: this.cfg.loadTimeoutMs }).then(() => true, () => false);
+    if (!drawn && this.counts.frames + this.counts.responses === 0) throw new Error("inbox didn't load and no message data arrived");
+    if (!drawn) this.log("chat list still drawing, but message data is flowing: live");
     this.status = "live";
     this.lastDataAt = Date.now();
     this.log(`live after ${Math.round((Date.now() - this.startedAt) / 1000)}s`);
@@ -216,10 +220,12 @@ export class LiveInbox {
       if (now - this.lastDataAt > this.cfg.staleAfterMs) {
         this.log("no message data for a while: reloading the tab");
         await this.page.reload({ waitUntil: "domcontentloaded", timeout: this.cfg.loadTimeoutMs });
-        await this.page.waitForSelector(ROW_SELECTOR, { timeout: this.cfg.loadTimeoutMs });
+        await this.page.waitForSelector(ROW_SELECTOR, { timeout: this.cfg.loadTimeoutMs }).catch(() => {});
         this.lastDataAt = Date.now();
         await this.saveLogin();
       }
+      // Requests can only be accepted once the chat list has drawn.
+      if (!(await this.page.$(ROW_SELECTOR))) return;
       const accepted = await acceptRequests(this.page, this.cfg.inboxUrl, 10, { inPlace: true }).catch(() => 0);
       if (accepted > 0) {
         this.counts.accepted += accepted;
@@ -294,14 +300,18 @@ export class LiveInbox {
   }
 }
 
-/** Total memory used by the container (this process and Chromium), from cgroups. */
-async function containerMemMB(): Promise<number | null> {
+/**
+ * Container memory from cgroups: total, and the part that really counts ("used" = without file cache,
+ * which the system frees on its own before running out).
+ */
+async function containerMemMB(): Promise<{ totalMB: number; usedMB: number | null } | null> {
   const { readFile } = await import("node:fs/promises");
-  for (const f of ["/sys/fs/cgroup/memory.current", "/sys/fs/cgroup/memory/memory.usage_in_bytes"]) {
-    const v = await readFile(f, "utf8").catch(() => null);
-    if (v) return Math.round(Number(v) / 1e6);
-  }
-  return null;
+  const total = await readFile("/sys/fs/cgroup/memory.current", "utf8").catch(() => null);
+  if (!total) return null;
+  const stat = await readFile("/sys/fs/cgroup/memory.stat", "utf8").catch(() => "");
+  const field = (k: string) => Number(stat.match(new RegExp(`^${k} (\\d+)`, "m"))?.[1] ?? NaN);
+  const used = field("anon") + field("kernel");
+  return { totalMB: Math.round(Number(total) / 1e6), usedMB: Number.isFinite(used) ? Math.round(used / 1e6) : null };
 }
 
 export function startServer(bot: LiveInbox, cfg: LiveConfig, port: number) {
