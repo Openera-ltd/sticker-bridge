@@ -87,13 +87,9 @@ fun StickersTab(
         ScreenHeader(
             title = "Stickers",
             subtitle = when {
-                syncing -> "Checking for new stickers…"
-                stickers.isEmpty() -> "Nothing yet"
-                else -> buildString {
-                    append(stickers.size).append(if (stickers.size == 1) " sticker" else " stickers")
-                    if (newCount > 0) append(" · ").append(newCount).append(" new")
-                    if (lastSyncAt > 0) append(" · synced ").append(DateUtils.getRelativeTimeSpanString(lastSyncAt, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS).toString().lowercase())
-                }
+                stickers.isEmpty() -> null
+                newCount > 0 -> "${stickers.size} · $newCount new"
+                else -> "${stickers.size}"
             },
         ) {
             IconButton(onClick = onSync, enabled = !syncing) { Ico(R.drawable.ic_sync, "Check for new stickers") }
@@ -109,21 +105,15 @@ fun StickersTab(
             ) {
                 item(span = { GridItemSpan(maxLineSpan) }) { banner() }
                 item(span = { GridItemSpan(maxLineSpan) }) {
-                    InfoPanel(icon = R.drawable.ic_send) {
-                        Text(buildAnnotatedString {
-                            append("Send any sticker to ")
-                            withStyle(SpanStyle(fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)) {
-                                append("@${BuildConfig.BOT_USERNAME}")
-                            }
-                            append(" on TikTok to add it here.")
-                        })
-                    }
+                    PrimaryButton("Send stickers to @${BuildConfig.BOT_USERNAME}", { openTikTokProfile(ctx) }, leading = R.drawable.ic_send)
                 }
                 if (stickers.isEmpty()) {
-                    item(span = { GridItemSpan(maxLineSpan) }) { EmptyState { openTikTokProfile(ctx) } }
+                    item(span = { GridItemSpan(maxLineSpan) }) { EmptyState() }
                 }
                 items(newest, key = { it.id }) { s ->
-                    StickerTile(s, File(dir, s.fileName)) { open = s.id }
+                    Box(Modifier.animateItem()) {
+                        StickerTile(s, File(dir, s.fileName)) { open = s.id }
+                    }
                 }
             }
         }
@@ -166,20 +156,11 @@ private fun StickerTile(s: LocalSticker, file: File, onClick: () -> Unit) {
 }
 
 @Composable
-private fun EmptyState(onOpen: () -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(vertical = 40.dp, horizontal = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+private fun EmptyState() {
+    Column(Modifier.fillMaxWidth().padding(vertical = 48.dp, horizontal = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         LogoMark(48.dp)
         Spacer(Modifier.height(16.dp))
-        Text("No stickers yet", style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(6.dp))
-        Text(
-            "Send a sticker to @${BuildConfig.BOT_USERNAME} on TikTok. It shows up here within a minute.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.height(16.dp))
-        SecondaryButton("Open TikTok", onOpen)
+        Text("No stickers yet", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -206,18 +187,8 @@ private fun StickerSheet(
             ) { StickerImage(file, "Sticker preview", Modifier.size(168.dp)) }
             Spacer(Modifier.height(16.dp))
             Text(packName ?: "Not in a pack yet", style = MaterialTheme.typography.titleMedium)
-            Text(
-                if (sticker.animated) "Animated sticker" else "Still sticker · 512 × 512 WebP",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
             Spacer(Modifier.height(20.dp))
             Text("Emojis", style = MaterialTheme.typography.titleSmall)
-            Text(
-                "Up to 3. WhatsApp uses them to find this sticker when you type.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
             Spacer(Modifier.height(10.dp))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 EMOJI_CHOICES.forEach { e ->

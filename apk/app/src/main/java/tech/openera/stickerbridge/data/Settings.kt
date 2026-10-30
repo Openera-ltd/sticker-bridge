@@ -22,7 +22,7 @@ data class AppSettings(
     val syncIntervalMin: Int = 30,
     val wifiOnly: Boolean = false,
     val notifyNewStickers: Boolean = true,
-    val outline: Boolean = true,
+    val outline: Boolean = false,
     val packName: String = DEFAULT_PACK_NAME,
     val defaultEmoji: String = "😀",
     val theme: ThemeMode = ThemeMode.System,
@@ -55,6 +55,7 @@ class SettingsRepo(private val context: Context) {
         val wifiOnly = booleanPreferencesKey("wifi_only")
         val notify = booleanPreferencesKey("notify")
         val outline = booleanPreferencesKey("outline")
+        val outlineDefaultChecked = booleanPreferencesKey("outline_default_102")
         val packName = stringPreferencesKey("pack_name")
         val emoji = stringPreferencesKey("default_emoji")
         val theme = stringPreferencesKey("theme")
@@ -75,7 +76,7 @@ class SettingsRepo(private val context: Context) {
             syncIntervalMin = p[K.interval] ?: 30,
             wifiOnly = p[K.wifiOnly] ?: false,
             notifyNewStickers = p[K.notify] ?: true,
-            outline = p[K.outline] ?: true,
+            outline = p[K.outline] ?: false,
             packName = p[K.packName] ?: AppSettings.DEFAULT_PACK_NAME,
             defaultEmoji = p[K.emoji] ?: "😀",
             theme = p[K.theme]?.let { runCatching { ThemeMode.valueOf(it) }.getOrNull() } ?: ThemeMode.System,
@@ -113,7 +114,7 @@ class SettingsRepo(private val context: Context) {
                 syncIntervalMin = p[K.interval] ?: 30,
                 wifiOnly = p[K.wifiOnly] ?: false,
                 notifyNewStickers = p[K.notify] ?: true,
-                outline = p[K.outline] ?: true,
+                outline = p[K.outline] ?: false,
                 packName = p[K.packName] ?: AppSettings.DEFAULT_PACK_NAME,
                 defaultEmoji = p[K.emoji] ?: "😀",
                 theme = p[K.theme]?.let { runCatching { ThemeMode.valueOf(it) }.getOrNull() } ?: ThemeMode.System,
@@ -148,6 +149,21 @@ class SettingsRepo(private val context: Context) {
             if (cursor != null) it[K.cursor] = cursor
             it[K.lastSync] = at
         }
+    }
+
+    /**
+     * 1.0.2 turned the white outline off by default. Returns true once if this install never chose
+     * a setting, so stickers made with the old default can be redone without the outline.
+     */
+    suspend fun outlineDefaultChanged(): Boolean {
+        var changed = false
+        context.store.edit { p ->
+            if (p[K.outlineDefaultChecked] != true) {
+                p[K.outlineDefaultChecked] = true
+                changed = p[K.outline] == null
+            }
+        }
+        return changed
     }
 
     suspend fun clearSession() {

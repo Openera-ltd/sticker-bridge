@@ -160,7 +160,7 @@ class SyncRepositoryTest {
         assertEquals("Faves", store.packs("Faves").single().name)
 
         val before = store.file("s2.webp").readBytes()
-        settings.update { it.copy(outline = false) }
+        settings.update { it.copy(outline = true) }
         repo.reprocessAll()
         assertFalse(before.contentEquals(store.file("s2.webp").readBytes()))
 

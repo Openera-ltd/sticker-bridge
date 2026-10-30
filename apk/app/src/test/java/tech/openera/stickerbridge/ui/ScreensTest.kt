@@ -80,6 +80,7 @@ class ScreensTest {
             StickersTab(emptyList(), emptyList(), File("."), SyncStatus.Idle, 0, {}, {}, {}, { _, _ -> }, {})
         }
         rule.onNodeWithText("No stickers yet").assertIsDisplayed()
+        rule.onNodeWithText("Send stickers to @stickerbridge").assertIsDisplayed()
         rule.onNodeWithContentDescription("Check for new stickers").assertIsDisplayed()
     }
 
@@ -93,8 +94,9 @@ class ScreensTest {
                 added = p.id to app
             }
         }
-        rule.onNodeWithText("Send 1 more sticker to unlock this pack.").assertIsDisplayed()
-        rule.onNodeWithText("In WhatsApp. New stickers appear there automatically.").assertExists()
+        rule.onNodeWithText("1 more to unlock").assertIsDisplayed()
+        rule.onNodeWithText("Added to WhatsApp").assertExists()
+        rule.onNodeWithText("Long-press a sticker in WhatsApp to add it to favourites").assertExists()
         rule.onNodeWithText("Add to WhatsApp Business").performClick()
         assertEquals("animated-1" to WaApp.Business, added)
     }

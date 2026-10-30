@@ -39,7 +39,7 @@ fun PacksTab(
     onAdd: (Pack, WaApp) -> Unit,
 ) {
     Column(Modifier.fillMaxSize()) {
-        ScreenHeader("Packs", "Each pack holds up to 30. New ones start automatically.")
+        ScreenHeader("Packs", null)
         LazyColumn(
             contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -49,7 +49,7 @@ fun PacksTab(
             if (packs.isEmpty()) {
                 item {
                     InfoPanel(icon = R.drawable.ic_info) {
-                        Text("Your first pack appears once you've sent 3 stickers. WhatsApp needs at least 3 per pack.")
+                        Text("3 stickers make your first pack")
                     }
                 }
             }
@@ -59,6 +59,14 @@ fun PacksTab(
             if (installed.isEmpty() && packs.any { it.ready }) {
                 item {
                     InfoPanel(icon = R.drawable.ic_info) { Text("Install WhatsApp to add your packs.") }
+                }
+            }
+            if (status.values.any { m -> m.values.any { it == true } }) {
+                item {
+                    // WhatsApp doesn't let other apps add favourites, so explain the quickest way.
+                    InfoPanel(icon = R.drawable.ic_info) {
+                        Text("Long-press a sticker in WhatsApp to add it to favourites")
+                    }
                 }
             }
         }
@@ -77,11 +85,6 @@ private fun PackCard(p: Pack, dir: File, installed: List<WaApp>, status: Map<WaA
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Text(
-                if (p.animated) "Animated stickers" else "Still stickers",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
             Spacer(Modifier.height(14.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 val shown = p.stickers.takeLast(6).reversed()
@@ -107,9 +110,8 @@ private fun PackCard(p: Pack, dir: File, installed: List<WaApp>, status: Map<WaA
                     drawStopIndicator = {},
                 )
                 Spacer(Modifier.height(10.dp))
-                val kind = if (p.animated) "animated sticker" else "sticker"
                 Text(
-                    "Send ${p.missing} more $kind${if (p.missing > 1) "s" else ""} to unlock this pack.",
+                    "${p.missing} more to unlock",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -120,7 +122,7 @@ private fun PackCard(p: Pack, dir: File, installed: List<WaApp>, status: Map<WaA
                 installed.forEach { app ->
                     if (status[app] == true) {
                         InfoPanel(icon = R.drawable.ic_check, tone = Tone.Success) {
-                            Text("In ${app.label}. New stickers appear there automatically.")
+                            Text("Added to ${app.label}")
                         }
                     } else {
                         PrimaryButton("Add to ${app.label}", { onAdd(p, app) }, leading = R.drawable.ic_plus)

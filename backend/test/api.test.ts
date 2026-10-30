@@ -1,6 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
-import { cleanup, findCode, isAnimated, newCode, sha256Hex, sniffType } from "../src/index";
+import { cleanup, findCode, isAnimated, isWhatsAppAnimated, newCode, sha256Hex, sniffType, toWhatsAppAnimated, webpSize } from "../src/index";
 
 const BASE = "https://api.sticker.openera.tech";
 const worker = (exports as unknown as { default: Fetcher }).default;
@@ -203,6 +203,46 @@ describe("bot login storage", () => {
     expect((await call("/internal/bot-state", { method: "PUT", headers: h, body: JSON.stringify(state) })).status).toBe(200);
     expect(await (await call("/internal/bot-state", { headers: h })).json()).toEqual(state);
     expect((await call("/internal/bot-state", { headers: { authorization: "Bearer admin-secret" } })).status).toBe(401);
+  });
+});
+
+/** A fake animated WebP header with a given canvas size and total length. */
+function animWebp(w: number, h: number, length = 64): Uint8Array {
+  const b = new Uint8Array(length);
+  b.set([..."RIFF"].map((c) => c.charCodeAt(0)), 0);
+  b.set([..."WEBPVP8X"].map((c) => c.charCodeAt(0)), 8);
+  b[20] = 0x02;
+  const put = (o: number, v: number) => b.set([v & 255, (v >> 8) & 255, (v >> 16) & 255], o);
+  put(24, w - 1); put(27, h - 1);
+  return b;
+}
+
+describe("animated sticker conversion", () => {
+  it("knows WhatsApp's animated format", () => {
+    expect(webpSize(animWebp(512, 512))).toEqual([512, 512]);
+    expect(isWhatsAppAnimated(animWebp(512, 512))).toBe(true);
+    expect(isWhatsAppAnimated(animWebp(480, 512))).toBe(false);
+    expect(isWhatsAppAnimated(animWebp(512, 512, 600 * 1024))).toBe(false);
+  });
+
+  it("asks Cloudflare for 512x512 animated WebP and lowers quality until it fits", async () => {
+    const asked: any[] = [];
+    const fake = (async (_url: string, init: any) => {
+      asked.push(init.cf.image);
+      const tooBig = init.cf.image.quality > 50;
+      return new Response(animWebp(512, 512, tooBig ? 700 * 1024 : 300 * 1024));
+    }) as unknown as typeof fetch;
+    const out = await toWhatsAppAnimated("https://example.com/s.awebp", fake);
+    expect(out!.byteLength).toBe(300 * 1024);
+    expect(asked.map((a) => a.quality)).toEqual([80, 65, 50]);
+    expect(asked[0]).toMatchObject({ width: 512, height: 512, fit: "pad", format: "webp", anim: true });
+  });
+
+  it("gives up when the result isn't animated or never fits", async () => {
+    const still = (async () => new Response(new Uint8Array(100))) as unknown as typeof fetch;
+    expect(await toWhatsAppAnimated("https://x", still)).toBeNull();
+    const huge = (async () => new Response(animWebp(512, 512, 900 * 1024))) as unknown as typeof fetch;
+    expect(await toWhatsAppAnimated("https://x", huge)).toBeNull();
   });
 });
 

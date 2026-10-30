@@ -100,7 +100,6 @@ fun SettingsTab(
                     Spacer(Modifier.size(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text("@${session.username ?: "unknown"}", style = MaterialTheme.typography.titleMedium)
-                        Text("Connected TikTok account", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
                 Divider()
@@ -110,13 +109,13 @@ fun SettingsTab(
             Spacer(Modifier.height(24.dp))
             SectionLabel("Sync")
             Group {
-                SwitchRow("Sync automatically", "New stickers go straight into your WhatsApp pack.", s.autoSync) { v -> onChange { it.copy(autoSync = v) } }
+                SwitchRow("Sync automatically", null, s.autoSync) { v -> onChange { it.copy(autoSync = v) } }
                 Divider()
                 NavRow("Check every", intervalLabel(s.syncIntervalMin), enabled = s.autoSync) { dialog = Dialog.Interval }
                 Divider()
-                SwitchRow("Wi-Fi only", "Don't use mobile data for syncing.", s.wifiOnly, enabled = s.autoSync) { v -> onChange { it.copy(wifiOnly = v) } }
+                SwitchRow("Wi-Fi only", null, s.wifiOnly, enabled = s.autoSync) { v -> onChange { it.copy(wifiOnly = v) } }
                 Divider()
-                SwitchRow("Notify me", "When new stickers arrive.", s.notifyNewStickers) { v ->
+                SwitchRow("Notify me", null, s.notifyNewStickers) { v ->
                     if (v && Build.VERSION.SDK_INT >= 33) notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
                     else onChange { it.copy(notifyNewStickers = v) }
                 }
@@ -131,7 +130,7 @@ fun SettingsTab(
             Spacer(Modifier.height(24.dp))
             SectionLabel("Stickers")
             Group {
-                SwitchRow("White outline", "The classic sticker border. Changing it redoes all stickers.", s.outline) { v -> onChange { it.copy(outline = v) } }
+                SwitchRow("White outline", null, s.outline) { v -> onChange { it.copy(outline = v) } }
                 Divider()
                 NavRow("Pack name", s.packName) { dialog = Dialog.PackName }
                 Divider()
@@ -157,14 +156,14 @@ fun SettingsTab(
                 }
                 if (Build.VERSION.SDK_INT >= 31) {
                     Divider()
-                    SwitchRow("Wallpaper colours", "Match the app to your phone's colours.", s.wallpaperColors) { v -> onChange { it.copy(wallpaperColors = v) } }
+                    SwitchRow("Wallpaper colours", null, s.wallpaperColors) { v -> onChange { it.copy(wallpaperColors = v) } }
                 }
             }
 
             Spacer(Modifier.height(24.dp))
             SectionLabel("Updates")
             Group {
-                SwitchRow("Check automatically", "Once a day. You always choose when to install.", s.autoUpdateCheck) { v -> onChange { it.copy(autoUpdateCheck = v) } }
+                SwitchRow("Check automatically", null, s.autoUpdateCheck) { v -> onChange { it.copy(autoUpdateCheck = v) } }
                 Divider()
                 NavRow("Check for updates", "Version ${BuildConfig.VERSION_NAME}", onClick = onCheckUpdate)
             }
@@ -172,13 +171,9 @@ fun SettingsTab(
             Spacer(Modifier.height(24.dp))
             SectionLabel("Privacy")
             Group {
-                Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
-                    Text("Stickers are kept for 30 days", style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        "Then deleted from our server. Copies on this phone stay until you remove them.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Server copies kept", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                    Text("30 days", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Divider()
                 NavRow("Delete all my data", null, danger = true) { dialog = Dialog.Delete }
@@ -186,7 +181,7 @@ fun SettingsTab(
 
             Spacer(Modifier.height(24.dp))
             Text(
-                "Sticker Bridge ${BuildConfig.VERSION_NAME} · ${BuildConfig.API_BASE.removePrefix("https://").trimEnd('/')}\nNot affiliated with TikTok or WhatsApp",
+                "Sticker Bridge ${BuildConfig.VERSION_NAME}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,

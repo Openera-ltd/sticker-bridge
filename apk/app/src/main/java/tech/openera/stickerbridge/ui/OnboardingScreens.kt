@@ -61,18 +61,12 @@ fun WelcomeScreen(onStart: () -> Unit) {
             LogoMark(56.dp)
             Spacer(Modifier.height(28.dp))
             Text("Your TikTok stickers, in WhatsApp.", style = MaterialTheme.typography.headlineMedium)
-            Spacer(Modifier.height(12.dp))
-            Text(
-                "No screenshots, no cropping. Send a sticker on TikTok and it's ready to add.",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
             Spacer(Modifier.height(36.dp))
-            Step(1, "Connect TikTok once", "Send a short code. No password.")
+            Step(1, "Connect TikTok once")
             Spacer(Modifier.height(20.dp))
-            Step(2, "Send stickers to @${BuildConfig.BOT_USERNAME}", "From any chat, comment or your favourites.")
+            Step(2, "Send stickers to @${BuildConfig.BOT_USERNAME}")
             Spacer(Modifier.height(20.dp))
-            Step(3, "They sync to WhatsApp", "Add the pack once. New stickers follow on their own.")
+            Step(3, "They sync to WhatsApp")
             Spacer(Modifier.height(24.dp))
         }
         PrimaryButton("Get started", onStart)
@@ -87,7 +81,7 @@ fun WelcomeScreen(onStart: () -> Unit) {
 }
 
 @Composable
-private fun Step(n: Int, title: String, body: String) {
+private fun Step(n: Int, title: String) {
     Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         Surface(
             shape = CircleShape,
@@ -103,17 +97,18 @@ private fun Step(n: Int, title: String, body: String) {
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
             )
         }
-        Column {
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
+        Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 2.dp))
     }
 }
 
+/** Opens @stickerbridge straight in the TikTok app (either TikTok package), or the browser if TikTok isn't installed. */
 fun openTikTokProfile(context: Context) {
-    val i = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.tiktok.com/@${BuildConfig.BOT_USERNAME}"))
-        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    runCatching { context.startActivity(i) }
+    val url = Uri.parse("https://www.tiktok.com/@${BuildConfig.BOT_USERNAME}")
+    for (pkg in listOf("com.zhiliaoapp.musically", "com.ss.android.ugc.trill")) {
+        val inApp = Intent(Intent.ACTION_VIEW, url).setPackage(pkg).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (runCatching { context.startActivity(inApp) }.isSuccess) return
+    }
+    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, url).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
 }
 
 private fun copy(context: Context, text: String) {
@@ -139,7 +134,7 @@ fun ConnectScreen(link: LinkUi, onBack: () -> Unit, onStart: () -> Unit, onOpene
                     withStyle(SpanStyle(fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)) {
                         append("@${BuildConfig.BOT_USERNAME}")
                     }
-                    append(" from your TikTok account. It proves the account is yours — we never ask for your password.")
+                    append(" on TikTok")
                 },
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -190,13 +185,6 @@ fun ConnectScreen(link: LinkUi, onBack: () -> Unit, onStart: () -> Unit, onOpene
                     { onOpened(); openTikTokProfile(ctx) },
                     enabled = link is LinkUi.Code,
                     trailing = R.drawable.ic_open,
-                )
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    "Opens @${BuildConfig.BOT_USERNAME}. Tap Message, paste the code, send.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.align(Alignment.CenterHorizontally),
                 )
             }
         }

@@ -285,10 +285,21 @@ async function inbox(env: Env, req: Request): Promise<Response> {
     contentType = sniffType(new Uint8Array(bytes)) ?? contentType;
     if (!contentType.startsWith("image/")) return error(415, "Not an image");
 
+    // Animated stickers: Cloudflare re-makes them in WhatsApp's animated format. If that isn't possible,
+    // the original is kept and the app uses its first frame as a still sticker.
+    let animated = m.animated === true || isAnimated(new Uint8Array(bytes));
+    if (animated && m.url) {
+      const converted = await toWhatsAppAnimated(m.url).catch(() => null);
+      if (converted) {
+        bytes = converted;
+        contentType = "image/webp";
+      }
+    }
+    animated = isAnimated(new Uint8Array(bytes)) && isWhatsAppAnimated(new Uint8Array(bytes));
+
     const id = randomHex(12);
     const key = `stickers/${senderId}/${id}`;
     await env.FILES.put(key, bytes, { httpMetadata: { contentType } });
-    const animated = m.animated === true || isAnimated(new Uint8Array(bytes));
     await env.DB.prepare(
       "INSERT INTO stickers (id, account_id, r2_key, content_type, animated, size, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
     ).bind(id, senderId, key, contentType, animated ? 1 : 0, bytes.byteLength, now).run();
@@ -303,6 +314,41 @@ async function inbox(env: Env, req: Request): Promise<Response> {
     });
   }
   return error(400, "Unknown message type");
+}
+
+const MAX_ANIMATED_BYTES = 500 * 1024;
+
+/** WebP canvas size from its VP8X header. */
+export function webpSize(b: Uint8Array): [number, number] | null {
+  const s = (o: number, n: number) => String.fromCharCode(...b.slice(o, o + n));
+  if (b.length < 30 || s(0, 4) !== "RIFF" || s(12, 4) !== "VP8X") return null;
+  const u24 = (o: number) => b[o] | (b[o + 1] << 8) | (b[o + 2] << 16);
+  return [u24(24) + 1, u24(27) + 1];
+}
+
+/** What WhatsApp accepts as an animated sticker: animated WebP, 512 x 512, at most 500 KB. */
+export function isWhatsAppAnimated(b: Uint8Array): boolean {
+  const size = webpSize(b);
+  return b.length <= MAX_ANIMATED_BYTES && size !== null && size[0] === 512 && size[1] === 512;
+}
+
+/**
+ * Uses Cloudflare Image Transformations to turn an animated image into a 512 x 512 animated WebP
+ * (transparent padding) under 500 KB, lowering quality until it fits. Null if it can't.
+ */
+export async function toWhatsAppAnimated(url: string, fetcher: typeof fetch = fetch): Promise<ArrayBuffer | null> {
+  for (const quality of [80, 65, 50, 38, 28]) {
+    const res = await fetcher(url, {
+      headers: { "user-agent": "Mozilla/5.0" },
+      cf: { image: { width: 512, height: 512, fit: "pad", background: "rgba(0,0,0,0)", format: "webp", anim: true, quality } },
+    } as RequestInit);
+    if (!res.ok) return null;
+    const out = await res.arrayBuffer();
+    const b = new Uint8Array(out);
+    if (!isAnimated(b)) return null; // came back still: not worth keeping over the original
+    if (isWhatsAppAnimated(b)) return out;
+  }
+  return null;
 }
 
 export function sniffType(b: Uint8Array): string | null {
@@ -329,10 +375,10 @@ export function isAnimated(b: Uint8Array): boolean {
 /** The bot keeps its TikTok login here and refreshes it after every run. */
 async function botState(env: Env, req: Request): Promise<Response> {
   if (!(await sameSecret(bearer(req) ?? "", env.BOT_SECRET))) return error(401, "Bot only");
-  const key = "bot/state.json";
+  // Kept in the database, never in file storage: the bucket may be publicly readable.
   if (req.method === "GET") {
-    const obj = await env.FILES.get(key);
-    return obj ? new Response(obj.body, { headers: { "content-type": "application/json" } }) : error(404, "No saved state");
+    const row = await env.DB.prepare("SELECT value FROM bot_state WHERE id = 1").first<{ value: string }>();
+    return row ? new Response(row.value, { headers: { "content-type": "application/json" } }) : error(404, "No saved state");
   }
   const body = await req.text();
   if (body.length > 200_000) return error(413, "Too large");
@@ -341,7 +387,7 @@ async function botState(env: Env, req: Request): Promise<Response> {
   } catch {
     return error(400, "JSON body required");
   }
-  await env.FILES.put(key, body, { httpMetadata: { contentType: "application/json" } });
+  await env.DB.prepare("INSERT OR REPLACE INTO bot_state (id, value, updated_at) VALUES (1, ?, ?)").bind(body, Date.now()).run();
   return json({ ok: true });
 }
 
@@ -418,6 +464,22 @@ export default {
       r = p.match(/^\/admin\/releases\/(\d{1,9})$/);
       if (r && m === "PUT") return await publishRelease(env, req, r[1], url);
       if (p === "/admin/config" && m === "PUT") return await setConfig(env, req);
+      if (p === "/admin/convert-test" && m === "POST") {
+        // Try the animated-sticker conversion on a URL, for checking Cloudflare Images is working.
+        if (!(await sameSecret(bearer(req) ?? "", env.ADMIN_SECRET))) return error(401, "Admin only");
+        const { url: src, image } = await req.json<{ url: string; image?: Record<string, unknown> }>();
+        const raw = await fetch(src, {
+          headers: { "user-agent": "Mozilla/5.0" },
+          cf: { image: image ?? { width: 512, height: 512, fit: "pad", format: "webp", anim: true, quality: 80 } },
+        } as RequestInit);
+        const rb = new Uint8Array(await raw.arrayBuffer());
+        const out = await toWhatsAppAnimated(src);
+        const b = out ? new Uint8Array(out) : null;
+        return json({
+          firstTry: { status: raw.status, type: raw.headers.get("content-type"), cfResized: raw.headers.get("cf-resized"), bytes: rb.length, size: webpSize(rb), animated: isAnimated(rb), head: String.fromCharCode(...rb.slice(0, 16)) },
+          ok: Boolean(b), bytes: b?.length ?? 0, size: b ? webpSize(b) : null, animated: b ? isAnimated(b) : false,
+        });
+      }
       return error(404, "Not found");
     } catch (e) {
       console.error("request failed", p, e);
