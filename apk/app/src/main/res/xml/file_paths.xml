@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Only the stickers folder can be shared (to send one sticker to WhatsApp). -->
+<paths>
+    <files-path name="stickers" path="stickers/" />
+</paths>

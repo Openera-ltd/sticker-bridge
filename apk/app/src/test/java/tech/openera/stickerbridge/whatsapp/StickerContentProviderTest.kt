@@ -36,7 +36,16 @@ class StickerContentProviderTest {
         val api = FakeApi()
         repeat(4) { api.add("s$it", testPng(), emojis = listOf("😂", "🔥")) }
         api.add("lonely", tech.openera.stickerbridge.data.StickerProcessorTest.animatedWebpHeader(512, 512), animated = true)
-        SyncRepository(api, g.settings, g.store).sync()
+        val repo = SyncRepository(api, g.settings, g.store)
+        repo.sync()
+        // Packs the user made (fixed ids here so the URIs below are readable).
+        g.store.update(false) {
+            it.copy(packs = listOf(
+                tech.openera.stickerbridge.data.UserPack("static-1", "Faves", false, listOf("s0", "s1", "s2", "s3")),
+                tech.openera.stickerbridge.data.UserPack("animated-1", "Lonely", true, listOf("lonely")),
+            ))
+        }
+        repo.refreshTrays()
         authority = WhatsApp.authority(ctx)
         provider = Robolectric.setupContentProvider(StickerContentProvider::class.java, authority)
     }
@@ -51,7 +60,7 @@ class StickerContentProviderTest {
             assertEquals(1, c.count)
             c.moveToFirst()
             assertEquals("static-1", c.getString(c.getColumnIndexOrThrow("sticker_pack_identifier")))
-            assertEquals(AppSettings.DEFAULT_PACK_NAME, c.getString(c.getColumnIndexOrThrow("sticker_pack_name")))
+            assertEquals("Sticker Bridge · Faves", c.getString(c.getColumnIndexOrThrow("sticker_pack_name")))
             assertEquals("tray_static-1.png", c.getString(c.getColumnIndexOrThrow("sticker_pack_icon")))
             assertEquals("Sticker Bridge", c.getString(c.getColumnIndexOrThrow("sticker_pack_publisher")))
             assertEquals(0, c.getInt(c.getColumnIndexOrThrow("animated_sticker_pack")))

@@ -35,12 +35,13 @@ Deletes the account's stickers and links on the server.
 ### `GET v1/stickers[?since=<cursor>]` (Bearer)
 Stickers received after the cursor, oldest first.
 ```json
-{"items": [{"id": "abc123", "file": "v1/stickers/abc123/file", "animated": false, "createdAt": 1793366400000, "emojis": ["😂"]}],
+{"items": [{"id": "abc123", "file": "v1/stickers/abc123/file", "animated": false, "createdAt": 1793366400000, "replaces": null}],
  "cursor": "opaque-string"}
 ```
 - The app keeps asking with the new cursor until a page comes back empty (max 10 pages per sync).
 - `id`: letters, digits, `-`, `_` only (max 64).
-- `emojis` optional; the app uses the user's default emoji if empty.
+- `replaces`: id of an older copy of this sticker (for example a still image remade as animated).
+  The app swaps it in place, in every pack it was in, and deletes the old one.
 - `401` means the link is gone: the app signs out and asks the user to connect again.
 
 ### `GET <file>` (Bearer)
@@ -68,6 +69,23 @@ from this same domain, checks `sha256` and that the APK is signed with the same 
 
 ### `GET v1/app/apk/<versionCode>`
 The APK file (`application/vnd.android.package-archive`).
+
+### `GET v1/donation`
+Where donations go, signed by the owner, or `404` if not set.
+```json
+{"payload": "{\"paypal\":\"https://paypal.me/cyriqfx\",\"momo\":\"+237672612437\"}", "signature": "<base64 DER ECDSA P-256>"}
+```
+The app checks `signature` over the exact `payload` text with the public key built into the app
+(`DONATION_KEY`), and hides the section if it fails, so changing the database alone can't redirect donations.
+Release builds also hide it if the app isn't signed with the Sticker Bridge release key.
+To change it: `node backend/scripts/sign-donation.mjs <private.pem> '<payload json>'` (PUTs to `admin/donation`).
+
+## Admin (Bearer `ADMIN_SECRET`)
+- `PUT admin/releases/<n>`, `PUT admin/config`: publish an update, change config.
+- `PUT admin/donation`: store a signed donation payload. The app checks the signature, not the server.
+- `POST admin/reconvert` `{"limit":2,"after":0}`: re-checks stickers stored as still images; animated
+  originals are converted again and stored as new stickers with `replaces` set. Returns `{done, next, left}`.
+- `GET v1/tmp/<id>`: short-lived files used during conversion; deleted right after.
 
 ## Publishing an update
 1. Raise `versionCode` and `versionName` in `apk/app/build.gradle.kts`.

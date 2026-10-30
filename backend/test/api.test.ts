@@ -229,12 +229,12 @@ describe("animated sticker conversion", () => {
     const asked: any[] = [];
     const fake = (async (_url: string, init: any) => {
       asked.push(init.cf.image);
-      const tooBig = init.cf.image.quality > 50;
+      const tooBig = init.cf.image.quality > 42;
       return new Response(animWebp(512, 512, tooBig ? 700 * 1024 : 300 * 1024));
     }) as unknown as typeof fetch;
     const out = await toWhatsAppAnimated("https://example.com/s.awebp", fake);
     expect(out!.byteLength).toBe(300 * 1024);
-    expect(asked.map((a) => a.quality)).toEqual([80, 65, 50]);
+    expect(asked.map((a) => a.quality)).toEqual([80, 60, 42]);
     expect(asked[0]).toMatchObject({ width: 512, height: 512, fit: "pad", format: "webp", anim: true });
   });
 

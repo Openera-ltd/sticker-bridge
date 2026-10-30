@@ -143,6 +143,7 @@ private fun Home(vm: AppViewModel, startTab: String?) {
     val wa by vm.waStatus.collectAsStateWithLifecycle()
     val installed by vm.installedWa.collectAsStateWithLifecycle()
     val notice by vm.notice.collectAsStateWithLifecycle()
+    val donation by vm.donation.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
@@ -196,7 +197,11 @@ private fun Home(vm: AppViewModel, startTab: String?) {
 
     HomeFrame(tab, { tab = it; io.sentry.Sentry.addBreadcrumb("Opened $it tab", "navigation") }, snackbar) {
             when (tab) {
-                "packs" -> PacksTab(packs, g.store.dir, installed, wa, banner, onAdd)
+                "packs" -> PacksTab(
+                    packs, g.store.dir, installed, wa, banner, onAdd,
+                    onRename = { id, name -> vm.renamePack(id, name) },
+                    onDelete = { vm.deletePack(it) },
+                )
                 "settings" -> SettingsTab(
                     s, ses, banner,
                     onChange = vm::updateSettings,
@@ -206,12 +211,27 @@ private fun Home(vm: AppViewModel, startTab: String?) {
                     },
                     onDisconnect = { vm.signOut(deleteData = false) },
                     onDeleteAll = { vm.signOut(deleteData = true) },
+                    donation = donation,
                 )
                 else -> StickersTab(
-                    store.stickers, packs, g.store.dir, sync, ses.lastSyncAt, banner,
+                    store.stickers, packs, g.store.dir, sync, banner,
                     onSync = vm::syncNow,
                     onRemove = { vm.remove(it) },
-                    onEmojis = { id, e -> vm.setEmojis(id, e) },
+                    onSend = { file ->
+                        // Straight to WhatsApp if there's one; a picker if both WhatsApp and Business are installed.
+                        val app = installed.singleOrNull()
+                        runCatching { ctx.startActivity(WhatsApp.sendSticker(ctx, file, app)) }
+                            .onFailure { scope.launch { snackbar.showSnackbar("WhatsApp isn't installed.") } }
+                    },
+                    onCreatePack = { name, ids ->
+                        vm.createPack(name, ids) { n ->
+                            tab = "packs"
+                            scope.launch { snackbar.showSnackbar(if (n > 1) "$n packs created" else "Pack created") }
+                        }
+                    },
+                    onAddToPack = { id, ids ->
+                        vm.addToPack(id, ids) { n -> scope.launch { snackbar.showSnackbar(if (n == 1) "1 sticker added" else "$n stickers added") } }
+                    },
                     onSeen = { vm.markSeen() },
                 )
             }

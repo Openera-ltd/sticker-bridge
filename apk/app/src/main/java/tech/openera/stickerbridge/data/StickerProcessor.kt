@@ -114,6 +114,7 @@ object StickerProcessor {
     /** 96 x 96 PNG icon for a pack, made from its first sticker. */
     fun tray(stickerFile: ByteArray): ByteArray {
         val src = BitmapFactory.decodeByteArray(stickerFile, 0, stickerFile.size)
+            ?: firstFrame(stickerFile)
             ?: throw IllegalArgumentException("Not an image")
         val small = Bitmap.createScaledBitmap(src, TRAY, TRAY, true)
         val bos = ByteArrayOutputStream()
@@ -123,6 +124,19 @@ object StickerProcessor {
         val png = bos.toByteArray()
         check(png.size <= MAX_TRAY) { "Tray icon too large" }
         return png
+    }
+
+    /** First frame of an animated WebP, for phones where BitmapFactory won't read it. */
+    private fun firstFrame(bytes: ByteArray): Bitmap? = if (android.os.Build.VERSION.SDK_INT >= 28) runCatching {
+        android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(java.nio.ByteBuffer.wrap(bytes))) { d, _, _ ->
+            d.allocator = android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE
+        }
+    }.getOrNull() else null
+
+    /** A see-through tray icon, used only if no sticker in the pack can be read. */
+    fun blankTray(): ByteArray {
+        val b = Bitmap.createBitmap(TRAY, TRAY, Bitmap.Config.ARGB_8888)
+        return ByteArrayOutputStream().also { b.compress(Bitmap.CompressFormat.PNG, 100, it); b.recycle() }.toByteArray()
     }
 
     private fun ByteArray.ascii(from: Int, len: Int) = String(this, from, len, Charsets.US_ASCII)

@@ -30,6 +30,8 @@ class App : Application(), Configuration.Provider, coil.ImageLoaderFactory {
         val g = Graph.get(this)
         g.notifier.createChannels()
         scope.launch { SyncScheduler.apply(this@App, g.settings.current(), g.settings.currentSession().connected) }
+        // Packs from earlier versions become user packs (same ids, so WhatsApp keeps them).
+        scope.launch { g.sync.migratePacks() }
         // Stickers made with the old outline default are redone once, without it.
         scope.launch {
             if (g.settings.outlineDefaultChanged() && g.store.state.value.stickers.isNotEmpty()) {

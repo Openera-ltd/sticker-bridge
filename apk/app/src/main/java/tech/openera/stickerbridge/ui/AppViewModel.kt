@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -42,7 +43,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val sync: StateFlow<SyncStatus> = g.sync.status
     val update = g.updates.state
 
-    val packs: StateFlow<List<Pack>> = combine(g.store.state, g.settings.settings) { _, s -> g.store.packs(s.packName) }
+    val packs: StateFlow<List<Pack>> = g.store.state.map { g.store.packs() }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     private val _wa = MutableStateFlow<Map<String, Map<WaApp, Boolean?>>>(emptyMap())
@@ -51,6 +52,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _installed = MutableStateFlow<List<WaApp>>(emptyList())
     val installedWa: StateFlow<List<WaApp>> = _installed.asStateFlow()
+
+    private val _donation = MutableStateFlow<tech.openera.stickerbridge.data.DonationInfo?>(null)
+    /** Donation details, only when they carry the owner's valid signature. */
+    val donation: StateFlow<tech.openera.stickerbridge.data.DonationInfo?> = _donation.asStateFlow()
 
     private val _notice = MutableStateFlow<String?>(null)
     val notice: StateFlow<String?> = _notice.asStateFlow()
@@ -62,6 +67,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     init {
         viewModelScope.launch {
             runCatching { g.api.config() }.getOrNull()?.let { _notice.value = it.notice }
+        }
+        viewModelScope.launch {
+            val signed = runCatching { g.api.donation() }.getOrNull()
+            _donation.value = signed?.takeIf { tech.openera.stickerbridge.data.Integrity.genuine(getApplication()) }?.let { tech.openera.stickerbridge.data.Donations.verify(it, tech.openera.stickerbridge.BuildConfig.DONATION_KEY) }
         }
         viewModelScope.launch {
             val s = g.settings.current()
@@ -140,7 +149,34 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun markSeen() = viewModelScope.launch { g.sync.markAllSeen() }
     fun remove(id: String) = viewModelScope.launch { g.sync.remove(id); refreshWhatsApp() }
-    fun setEmojis(id: String, emojis: List<String>) = viewModelScope.launch { g.sync.setEmojis(id, emojis) }
+
+    // ---------- packs ----------
+
+    fun createPack(name: String, stickerIds: List<String>, done: (Int) -> Unit = {}) = viewModelScope.launch {
+        val made = g.sync.createPack(name, stickerIds)
+        WhatsApp.notifyChanged(getApplication())
+        refreshWhatsApp()
+        done(made.size)
+    }
+
+    fun addToPack(packId: String, stickerIds: List<String>, done: (Int) -> Unit = {}) = viewModelScope.launch {
+        val n = g.sync.addToPack(packId, stickerIds)
+        WhatsApp.notifyChanged(getApplication())
+        refreshWhatsApp()
+        done(n)
+    }
+
+    fun removeFromPack(packId: String, stickerId: String) = viewModelScope.launch {
+        g.sync.removeFromPack(packId, stickerId); WhatsApp.notifyChanged(getApplication()); refreshWhatsApp()
+    }
+
+    fun renamePack(packId: String, name: String) = viewModelScope.launch {
+        g.sync.renamePack(packId, name); WhatsApp.notifyChanged(getApplication())
+    }
+
+    fun deletePack(packId: String) = viewModelScope.launch {
+        g.sync.deletePack(packId); WhatsApp.notifyChanged(getApplication()); refreshWhatsApp()
+    }
 
     // ---------- WhatsApp ----------
 
@@ -164,8 +200,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val after = g.settings.current()
             SyncScheduler.apply(getApplication(), after, g.settings.currentSession().connected)
             if (before.outline != after.outline) g.sync.reprocessAll()
-            if (before.packName != after.packName) g.sync.renamePacks()
-            if (before.outline != after.outline || before.packName != after.packName) {
+            if (before.outline != after.outline) {
                 WhatsApp.notifyChanged(getApplication())
             }
         }

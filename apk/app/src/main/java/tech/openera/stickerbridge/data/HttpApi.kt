@@ -133,6 +133,12 @@ class HttpApi(
 
     override suspend fun config(): RemoteConfig = decode(call(req("v1/config").build()))
 
+    override suspend fun donation(): SignedDonation? = try {
+        decode<SignedDonation>(call(req("v1/donation").build()))
+    } catch (e: ApiException) {
+        if (e.code == 404) null else throw e
+    }
+
     override suspend fun latestApp(): AppRelease? = try {
         decode<AppRelease>(call(req("v1/app/latest").build()))
     } catch (e: ApiException) {

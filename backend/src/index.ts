@@ -129,14 +129,15 @@ async function stickersList(env: Env, req: Request, url: URL): Promise<Response>
   if (!d) return error(401, "Not connected");
   const since = Number.parseInt(url.searchParams.get("since") ?? "0", 10) || 0;
   const { results } = await env.DB.prepare(
-    "SELECT seq, id, animated, emojis, created_at FROM stickers WHERE account_id = ? AND seq > ? ORDER BY seq LIMIT ?",
-  ).bind(d.accountId, since, PAGE).all<{ seq: number; id: string; animated: number; emojis: string; created_at: number }>();
+    "SELECT seq, id, animated, emojis, created_at, replaces FROM stickers WHERE account_id = ? AND seq > ? ORDER BY seq LIMIT ?",
+  ).bind(d.accountId, since, PAGE).all<{ seq: number; id: string; animated: number; emojis: string; created_at: number; replaces: string | null }>();
   const items = results.map((r) => ({
     id: r.id,
     file: `v1/stickers/${r.id}/file`,
     animated: r.animated === 1,
     createdAt: r.created_at,
     emojis: JSON.parse(r.emojis) as string[],
+    ...(r.replaces ? { replaces: r.replaces } : {}),
   }));
   const cursor = results.length ? String(results[results.length - 1].seq) : String(since);
   return json({ items, cursor });
@@ -289,7 +290,7 @@ async function inbox(env: Env, req: Request): Promise<Response> {
     // the original is kept and the app uses its first frame as a still sticker.
     let animated = m.animated === true || isAnimated(new Uint8Array(bytes));
     if (animated && m.url) {
-      const converted = await toWhatsAppAnimated(m.url).catch(() => null);
+      const converted = await toWhatsAppAnimated(m.url, fetch, r2Stage(env)).catch(() => null);
       if (converted) {
         bytes = converted;
         contentType = "image/webp";
@@ -317,6 +318,7 @@ async function inbox(env: Env, req: Request): Promise<Response> {
 }
 
 const MAX_ANIMATED_BYTES = 500 * 1024;
+const PUBLIC_BASE = "https://api.sticker.openera.tech";
 
 /** WebP canvas size from its VP8X header. */
 export function webpSize(b: Uint8Array): [number, number] | null {
@@ -336,19 +338,49 @@ export function isWhatsAppAnimated(b: Uint8Array): boolean {
  * Uses Cloudflare Image Transformations to turn an animated image into a 512 x 512 animated WebP
  * (transparent padding) under 500 KB, lowering quality until it fits. Null if it can't.
  */
-export async function toWhatsAppAnimated(url: string, fetcher: typeof fetch = fetch): Promise<ArrayBuffer | null> {
-  for (const quality of [80, 65, 50, 38, 28]) {
-    const res = await fetcher(url, {
-      headers: { "user-agent": "Mozilla/5.0" },
-      cf: { image: { width: 512, height: 512, fit: "pad", background: "rgba(0,0,0,0)", format: "webp", anim: true, quality } },
-    } as RequestInit);
-    if (!res.ok) return null;
-    const out = await res.arrayBuffer();
-    const b = new Uint8Array(out);
+/** Saves bytes somewhere Cloudflare Images can read them; returns the URL and a clean-up. */
+export type Stage = (bytes: ArrayBuffer) => Promise<{ url: string; done: () => Promise<void> }>;
+
+export async function toWhatsAppAnimated(url: string, fetcher: typeof fetch = fetch, stage?: Stage): Promise<ArrayBuffer | null> {
+  const transform = async (src: string, image: Record<string, unknown>) => {
+    const res = await fetcher(src, { headers: { "user-agent": "Mozilla/5.0" }, cf: { image } } as RequestInit);
+    return res.ok ? new Uint8Array(await res.arrayBuffer()) : null;
+  };
+  const pad = (quality: number) => ({ width: 512, height: 512, fit: "pad", background: "rgba(0,0,0,0)", format: "webp", anim: true, quality });
+
+  // 1. Full size, lowering quality until it fits.
+  for (const quality of [80, 60, 42, 28, 20, 15]) {
+    const b = await transform(url, pad(quality));
+    if (!b) return null;
     if (!isAnimated(b)) return null; // came back still: not worth keeping over the original
-    if (isWhatsAppAnimated(b)) return out;
+    if (isWhatsAppAnimated(b)) return b.buffer as ArrayBuffer;
+  }
+  // 2. Big animations: shrink the picture first, then pad it back to 512 x 512 (transparent edges cost
+  //    almost nothing), so it fits WhatsApp's 500 KB limit and still moves.
+  if (!stage) return null;
+  for (const size of [320, 256, 192]) {
+    const small = await transform(url, { width: size, height: size, fit: "contain", format: "webp", anim: true, quality: 30 });
+    if (!small || !isAnimated(small)) return null;
+    const staged = await stage(small.buffer as ArrayBuffer);
+    try {
+      for (const quality of [30, 15]) {
+        const b = await transform(staged.url, pad(quality));
+        if (b && isAnimated(b) && isWhatsAppAnimated(b)) return b.buffer as ArrayBuffer;
+      }
+    } finally {
+      await staged.done().catch(() => {});
+    }
   }
   return null;
+}
+
+/** Stages through R2 and this API's own /v1/tmp route (random, unlisted, deleted right after). */
+export function r2Stage(env: Env): Stage {
+  return async (bytes) => {
+    const id = randomHex(16);
+    await env.FILES.put(`tmp/${id}`, bytes, { httpMetadata: { contentType: "image/webp" } });
+    return { url: `${PUBLIC_BASE}/v1/tmp/${id}`, done: () => env.FILES.delete(`tmp/${id}`) };
+  };
 }
 
 export function sniffType(b: Uint8Array): string | null {
@@ -389,6 +421,49 @@ async function botState(env: Env, req: Request): Promise<Response> {
   }
   await env.DB.prepare("INSERT OR REPLACE INTO bot_state (id, value, updated_at) VALUES (1, ?, ?)").bind(body, Date.now()).run();
   return json({ ok: true });
+}
+
+/**
+ * Re-makes stored stickers that are animated but were kept as stills (too big for WhatsApp before the
+ * shrink step existed). Each fixed one gets a new id that "replaces" the old, so phones swap it.
+ * A few per call (Workers limit subrequests); call again until "left" is 0.
+ */
+async function reconvert(env: Env, req: Request): Promise<Response> {
+  if (!(await sameSecret(bearer(req) ?? "", env.ADMIN_SECRET))) return error(401, "Admin only");
+  const { limit = 2, after = 0 } = await req.json<{ limit?: number; after?: number }>().catch(() => ({}) as { limit?: number; after?: number });
+  const { results } = await env.DB.prepare(
+    "SELECT seq, id, account_id, r2_key, created_at FROM stickers WHERE animated = 0 AND seq > ? ORDER BY seq LIMIT ?",
+  ).bind(after, Math.min(limit, 3)).all<{ seq: number; id: string; account_id: string; r2_key: string; created_at: number }>();
+  const done: { id: string; result: string }[] = [];
+  let last = after;
+  for (const row of results) {
+    last = row.seq;
+    const obj = await env.FILES.get(row.r2_key);
+    if (!obj) { done.push({ id: row.id, result: "missing" }); continue; }
+    const original = await obj.arrayBuffer();
+    if (!isAnimated(new Uint8Array(original))) { done.push({ id: row.id, result: "still" }); continue; }
+    const staged = await r2Stage(env)(original);
+    let out: ArrayBuffer | null = null;
+    try {
+      out = await toWhatsAppAnimated(staged.url, fetch, r2Stage(env)).catch(() => null);
+    } finally {
+      await staged.done();
+    }
+    if (!out) { done.push({ id: row.id, result: "too big" }); continue; }
+    const id = randomHex(12);
+    const key = `stickers/${row.account_id}/${id}`;
+    await env.FILES.put(key, out, { httpMetadata: { contentType: "image/webp" } });
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO stickers (id, account_id, r2_key, content_type, animated, size, created_at, replaces) VALUES (?, ?, ?, 'image/webp', 1, ?, ?, ?)",
+      ).bind(id, row.account_id, key, out.byteLength, row.created_at, row.id),
+      env.DB.prepare("DELETE FROM stickers WHERE id = ?").bind(row.id),
+    ]);
+    await env.FILES.delete(row.r2_key);
+    done.push({ id: row.id, result: `animated ${out.byteLength}` });
+  }
+  const left = await env.DB.prepare("SELECT COUNT(*) AS n FROM stickers WHERE animated = 0 AND seq > ?").bind(last).first<{ n: number }>();
+  return json({ done, next: last, left: left?.n ?? 0 });
 }
 
 // ---------- admin ----------
@@ -451,6 +526,17 @@ export default {
       let r = p.match(/^\/v1\/stickers\/([A-Za-z0-9_-]{1,64})\/file$/);
       if (r && m === "GET") return await stickerFile(env, req, r[1]);
       if (p === "/v1/config" && m === "GET") return await config(env);
+      if (p === "/v1/donation" && m === "GET") {
+        // Signed by the owner offline; the app verifies the signature before showing anything.
+        const row = await env.DB.prepare("SELECT payload, signature FROM donation WHERE id = 1").first<{ payload: string; signature: string }>();
+        return row ? json(row) : error(404, "Not set");
+      }
+      r = p.match(/^\/v1\/tmp\/([0-9a-f]{32})$/);
+      if (r && m === "GET") {
+        // Short-lived files for image conversion; ids are random and deleted right after use.
+        const obj = await env.FILES.get(`tmp/${r[1]}`);
+        return obj ? new Response(obj.body, { headers: { "content-type": "image/webp", "cache-control": "no-store" } }) : error(404, "Not found");
+      }
       if (p === "/v1/app/latest" && m === "GET") return await latestApp(env);
       r = p.match(/^\/v1\/app\/apk\/(\d{1,9})$/);
       if (r && m === "GET") return await apkFile(env, r[1]);
@@ -464,6 +550,15 @@ export default {
       r = p.match(/^\/admin\/releases\/(\d{1,9})$/);
       if (r && m === "PUT") return await publishRelease(env, req, r[1], url);
       if (p === "/admin/config" && m === "PUT") return await setConfig(env, req);
+      if (p === "/admin/reconvert" && m === "POST") return await reconvert(env, req);
+      if (p === "/admin/donation" && m === "PUT") {
+        if (!(await sameSecret(bearer(req) ?? "", env.ADMIN_SECRET))) return error(401, "Admin only");
+        const b = await req.json<{ payload?: string; signature?: string }>().catch(() => null);
+        if (!b?.payload || !b.signature) return error(400, "payload and signature required");
+        await env.DB.prepare("INSERT OR REPLACE INTO donation (id, payload, signature, updated_at) VALUES (1, ?, ?, ?)")
+          .bind(b.payload, b.signature, Date.now()).run();
+        return json({ ok: true });
+      }
       if (p === "/admin/convert-test" && m === "POST") {
         // Try the animated-sticker conversion on a URL, for checking Cloudflare Images is working.
         if (!(await sameSecret(bearer(req) ?? "", env.ADMIN_SECRET))) return error(401, "Admin only");

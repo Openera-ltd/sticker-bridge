@@ -55,6 +55,7 @@ class DemoApi(private val clock: () -> Long = System::currentTimeMillis) : Stick
     override suspend fun deleteData(token: String) = Unit
     override suspend fun config() = RemoteConfig()
     override suspend fun latestApp(): AppRelease? = null
+    override suspend fun donation(): SignedDonation? = null
 
     /** Draws a simple text sticker, like the ones people send on TikTok. */
     private fun render(i: Int): ByteArray {

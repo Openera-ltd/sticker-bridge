@@ -71,6 +71,7 @@ fun SettingsTab(
     onCheckUpdate: () -> Unit,
     onDisconnect: () -> Unit,
     onDeleteAll: () -> Unit,
+    donation: tech.openera.stickerbridge.data.DonationInfo? = null,
 ) {
     var dialog by remember { mutableStateOf(Dialog.None) }
     val notifPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -129,10 +130,6 @@ fun SettingsTab(
             SectionLabel("Stickers")
             Group {
                 SwitchRow("White outline", null, s.outline) { v -> onChange { it.copy(outline = v) } }
-                Divider()
-                NavRow("Pack name", s.packName) { dialog = Dialog.PackName }
-                Divider()
-                NavRow("Default emoji", s.defaultEmoji) { dialog = Dialog.Emoji }
             }
 
             Spacer(Modifier.height(24.dp))
@@ -177,7 +174,32 @@ fun SettingsTab(
                 NavRow("Delete all my data", null, danger = true) { dialog = Dialog.Delete }
             }
 
+            // Shown only when the details carry the owner's signature (checked in Donations.verify).
+            if (donation != null) {
+                val ctx = androidx.compose.ui.platform.LocalContext.current
+                var copied by remember { mutableStateOf(false) }
+                Spacer(Modifier.height(24.dp))
+                SectionLabel("Support Sticker Bridge")
+                Group {
+                    donation.paypal?.let { link ->
+                        NavRow("PayPal", link.removePrefix("https://").removePrefix("www.")) { openLink(ctx, link) }
+                    }
+                    if (donation.paypal != null && donation.momo != null) Divider()
+                    donation.momo?.let { number ->
+                        NavRow("MTN Mobile Money", if (copied) "Copied" else number) {
+                            val cm = ctx.getSystemService(android.content.ClipboardManager::class.java)
+                            cm.setPrimaryClip(android.content.ClipData.newPlainText("MTN Mobile Money", number))
+                            copied = true
+                        }
+                    }
+                }
+            }
+
             Spacer(Modifier.height(24.dp))
+            val ctx = androidx.compose.ui.platform.LocalContext.current
+            SecondaryButton("Source code on GitHub", { openLink(ctx, BuildConfig.SOURCE_URL) }, Modifier.fillMaxWidth())
+
+            Spacer(Modifier.height(16.dp))
             Text(
                 "Sticker Bridge ${BuildConfig.VERSION_NAME}",
                 style = MaterialTheme.typography.bodySmall,
@@ -197,8 +219,7 @@ fun SettingsTab(
             onPick = { v -> onChange { it.copy(syncIntervalMin = v) }; dialog = Dialog.None },
             onDismiss = { dialog = Dialog.None },
         )
-        Dialog.PackName -> TextDialog("Pack name", s.packName, { v -> onChange { it.copy(packName = v) }; dialog = Dialog.None }) { dialog = Dialog.None }
-        Dialog.Emoji -> EmojiDialog(s.defaultEmoji, { v -> onChange { it.copy(defaultEmoji = v) }; dialog = Dialog.None }) { dialog = Dialog.None }
+        Dialog.PackName, Dialog.Emoji -> dialog = Dialog.None
         Dialog.Disconnect -> ConfirmDialog(
             "Disconnect TikTok?",
             "Stickers already on this phone stay, and your WhatsApp packs keep working. New stickers stop arriving until you connect again.",
@@ -294,57 +315,7 @@ private fun <T> ChoiceDialog(title: String, options: List<T>, selected: T, label
     )
 }
 
-@Composable
-private fun TextDialog(title: String, initial: String, onSave: (String) -> Unit, onDismiss: () -> Unit) {
-    var value by remember { mutableStateOf(initial) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = {
-            OutlinedTextField(
-                value = value,
-                onValueChange = { value = it.take(60) },
-                singleLine = true,
-                label = { Text("Name shown in WhatsApp") },
-                modifier = Modifier.fillMaxWidth(),
-            )
-        },
-        confirmButton = { TextButton(onClick = { onSave(value) }, enabled = value.isNotBlank()) { Text("Save") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
-}
 
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun EmojiDialog(current: String, onPick: (String) -> Unit, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Default emoji") },
-        text = {
-            Column {
-                Text(
-                    "Used for new stickers. WhatsApp needs at least one emoji per sticker.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(12.dp))
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    EMOJI_CHOICES.forEach { e ->
-                        val on = e == current
-                        Surface(
-                            onClick = { onPick(e) },
-                            shape = RoundedCornerShape(10.dp),
-                            color = if (on) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
-                            border = BorderStroke(1.dp, if (on) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant),
-                            modifier = Modifier.size(44.dp),
-                        ) { Box(contentAlignment = Alignment.Center) { Text(e, fontSize = 20.sp) } }
-                    }
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
-    )
-}
 
 @Composable
 private fun ConfirmDialog(title: String, body: String, action: String, danger: Boolean, onConfirm: () -> Unit, onDismiss: () -> Unit) {
@@ -359,4 +330,10 @@ private fun ConfirmDialog(title: String, body: String, action: String, danger: B
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+fun openLink(context: android.content.Context, url: String) {
+    runCatching {
+        context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
 }

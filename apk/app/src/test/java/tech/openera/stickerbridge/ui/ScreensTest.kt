@@ -9,6 +9,9 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.longClick
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -77,7 +80,7 @@ class ScreensTest {
 
     @Test fun emptyStickersExplainWhatToDo() {
         themed {
-            StickersTab(emptyList(), emptyList(), File("."), SyncStatus.Idle, 0, {}, {}, {}, { _, _ -> }, {})
+            StickersTab(emptyList(), emptyList(), File("."), SyncStatus.Idle, {}, {}, {}, {}, { _, _ -> }, { _, _ -> }, {})
         }
         rule.onNodeWithText("No stickers yet").assertIsDisplayed()
         rule.onNodeWithText("Send stickers to @stickerbridge").assertIsDisplayed()
@@ -90,9 +93,9 @@ class ScreensTest {
         val packs = PackBuilder.build(two + three, "Faves")
         var added: Pair<String, WaApp>? = null
         themed {
-            PacksTab(packs, File("."), listOf(WaApp.Consumer, WaApp.Business), mapOf("animated-1" to mapOf(WaApp.Consumer to true, WaApp.Business to false)), {}) { p, app ->
+            PacksTab(packs, File("."), listOf(WaApp.Consumer, WaApp.Business), mapOf("animated-1" to mapOf(WaApp.Consumer to true, WaApp.Business to false)), {}, onAdd = { p, app ->
                 added = p.id to app
-            }
+            })
         }
         rule.onNodeWithText("1 more to unlock").assertIsDisplayed()
         rule.onNodeWithText("Added to WhatsApp").assertExists()
@@ -126,6 +129,45 @@ class ScreensTest {
         rule.onNodeWithText("Open settings").assertIsDisplayed()
         state = UpdateState.Downloading(r, 0.4f)
         rule.onNodeWithText("Downloading 1.1.0…").assertIsDisplayed()
+    }
+
+    private val openSticker = androidx.compose.ui.test.SemanticsMatcher("opens a sticker") {
+        it.config.getOrElseNullable(androidx.compose.ui.semantics.SemanticsActions.OnClick) { null }?.label == "Open sticker"
+    }
+
+    @Test fun longPressSelectsStickersIntoANewPack() {
+        val stickers = (1..4).map { LocalSticker("s$it", "s$it.webp", addedAt = it.toLong(), isNew = false) }
+        var sent = false
+        themed {
+            StickersTab(stickers, emptyList(), File("."), SyncStatus.Idle, {}, {}, {}, { sent = true }, { _, _ -> }, { _, _ -> }, {})
+        }
+        val tiles = rule.onAllNodes(openSticker)
+        tiles[0].performTouchInput { longClick() }
+        tiles[1].performClick()
+        tiles[2].performClick()
+        rule.onNodeWithText("3 selected").assertIsDisplayed()
+        rule.onNodeWithText("New pack").assertIsDisplayed() // the dialog itself is checked in PackDialogTest
+
+        // Leaving selection, a normal tap opens the sticker, which can be sent on its own.
+        rule.onNodeWithContentDescription("Cancel selection").performClick()
+        rule.onNodeWithText("Stickers").assertIsDisplayed()
+        rule.onAllNodes(openSticker)[0].performClick()
+        rule.onNodeWithText("Send to WhatsApp").performClick()
+        assertTrue(sent)
+    }
+
+    @Test fun settingsShowSignedDonationsAndSourceCode() {
+        themed {
+            SettingsTab(
+                AppSettings(), Session(token = "t", username = "mia"), {}, {}, {}, {}, {}, {},
+                donation = tech.openera.stickerbridge.data.DonationInfo("https://paypal.me/cyriqfx", "+237672612437"),
+            )
+        }
+        rule.onNodeWithText("PayPal").performScrollTo().assertIsDisplayed()
+        rule.onNodeWithText("paypal.me/cyriqfx").assertIsDisplayed()
+        rule.onNodeWithText("+237672612437").performScrollTo().performClick()
+        rule.onNodeWithText("Copied").assertIsDisplayed()
+        rule.onNodeWithText("Source code on GitHub").performScrollTo().assertIsDisplayed()
     }
 
     @Test fun intervalLabels() {

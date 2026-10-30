@@ -13,6 +13,24 @@ data class LocalSticker(
     val isNew: Boolean = true,
 )
 
+/** A pack the user made from stickers they picked. */
+@Serializable
+data class UserPack(
+    /** Stable id WhatsApp knows the pack by. */
+    val id: String,
+    /** What the user typed; WhatsApp shows "Sticker Bridge · <name>". */
+    val name: String,
+    val animated: Boolean,
+    val stickerIds: List<String>,
+    val createdAt: Long = 0,
+) {
+    companion object {
+        const val PREFIX = "Sticker Bridge"
+        fun displayName(name: String): String =
+            if (name.isBlank()) PREFIX else "$PREFIX · ${name.trim()}".take(128)
+    }
+}
+
 data class Pack(
     /** Stable id WhatsApp knows the pack by, e.g. "static-1". */
     val id: String,

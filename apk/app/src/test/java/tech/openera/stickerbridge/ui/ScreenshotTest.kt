@@ -74,13 +74,13 @@ class ScreenshotTest {
 
     @Test fun stickersLight() = shot("04-stickers", false) {
         HomeFrame("stickers", {}, SnackbarHostState()) {
-            StickersTab(stickers, PackBuilder.build(stickers, "My TikTok Stickers"), dir, SyncStatus.Idle, System.currentTimeMillis() - 120_000, {}, {}, {}, { _, _ -> }, {})
+            StickersTab(stickers, PackBuilder.build(stickers, "My TikTok Stickers"), dir, SyncStatus.Idle, {}, {}, {}, {}, { _, _ -> }, { _, _ -> }, {})
         }
     }
 
     @Test fun stickersDarkWithUpdate() = shot("05-stickers-dark-update", true) {
         HomeFrame("stickers", {}, SnackbarHostState()) {
-            StickersTab(stickers, emptyList(), dir, SyncStatus.Idle, System.currentTimeMillis() - 60_000, { UpdateBanner(UpdateState.Available(release), {}, {}, {}) }, {}, {}, { _, _ -> }, {})
+            StickersTab(stickers, emptyList(), dir, SyncStatus.Idle, { UpdateBanner(UpdateState.Available(release), {}, {}, {}) }, {}, {}, {}, { _, _ -> }, { _, _ -> }, {})
         }
     }
 
@@ -91,13 +91,14 @@ class ScreenshotTest {
                 PackBuilder.build(stickers + anim, "My TikTok Stickers"), dir,
                 listOf(WaApp.Consumer, WaApp.Business),
                 mapOf("static-1" to mapOf(WaApp.Consumer to true, WaApp.Business to false)), {},
-            ) { _, _ -> }
+                onAdd = { _, _ -> },
+            )
         }
     }
 
     @Test fun packsDark() = shot("07-packs-dark", true) {
         HomeFrame("packs", {}, SnackbarHostState()) {
-            PacksTab(PackBuilder.build(stickers, "My TikTok Stickers"), dir, listOf(WaApp.Consumer), emptyMap(), {}) { _, _ -> }
+            PacksTab(PackBuilder.build(stickers, "My TikTok Stickers"), dir, listOf(WaApp.Consumer), emptyMap(), {}, onAdd = { _, _ -> })
         }
     }
 
@@ -109,7 +110,7 @@ class ScreenshotTest {
 
     @Test fun emptyDark() = shot("09-empty-dark", true) {
         HomeFrame("stickers", {}, SnackbarHostState()) {
-            StickersTab(emptyList(), emptyList(), dir, SyncStatus.Idle, 0, {}, {}, {}, { _, _ -> }, {})
+            StickersTab(emptyList(), emptyList(), dir, SyncStatus.Idle, {}, {}, {}, {}, { _, _ -> }, { _, _ -> }, {})
         }
     }
 }

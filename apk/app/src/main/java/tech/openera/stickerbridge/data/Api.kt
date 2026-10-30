@@ -30,7 +30,13 @@ interface StickerApi {
     suspend fun config(): RemoteConfig
 
     suspend fun latestApp(): AppRelease?
+
+    /** Signed donation details, or null if none are set. */
+    suspend fun donation(): SignedDonation?
 }
+
+@Serializable
+data class SignedDonation(val payload: String, val signature: String)
 
 @Serializable
 data class LinkStart(
@@ -67,6 +73,8 @@ data class RemoteSticker(
     val animated: Boolean = false,
     val createdAt: Long = 0,
     val emojis: List<String> = emptyList(),
+    /** Set when this is a re-made version of an older sticker, which it should replace. */
+    val replaces: String? = null,
 )
 
 @Serializable

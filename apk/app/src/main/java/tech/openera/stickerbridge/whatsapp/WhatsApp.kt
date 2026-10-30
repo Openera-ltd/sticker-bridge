@@ -48,6 +48,21 @@ object WhatsApp {
             setPackage(app.pkg)
         }
 
+    /**
+     * Sends one sticker to a WhatsApp chat (the user picks the chat). WhatsApp sends a 512 x 512 WebP
+     * as a sticker; from the chat it can be long-pressed and added to favourites.
+     */
+    fun sendSticker(context: Context, file: java.io.File, app: WaApp?): Intent {
+        val uri = androidx.core.content.FileProvider.getUriForFile(context, context.packageName + ".files", file)
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "image/webp"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            if (app != null) setPackage(app.pkg)
+        }
+        return if (app != null) send else Intent.createChooser(send, null)
+    }
+
     /** Tells WhatsApp (if it is listening) that a pack's contents changed. */
     fun notifyChanged(context: Context) {
         val base = Uri.parse("content://${authority(context)}")

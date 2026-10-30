@@ -38,9 +38,15 @@ class FakeApi(var stickers: MutableList<RemoteSticker> = mutableListOf()) : Stic
     override suspend fun deleteData(token: String) = Unit
     override suspend fun config() = RemoteConfig()
     override suspend fun latestApp(): AppRelease? = null
+    override suspend fun donation(): SignedDonation? = null
 
     fun add(id: String, bytes: ByteArray, animated: Boolean = false, emojis: List<String> = emptyList()) {
         stickers += RemoteSticker(id, "v1/stickers/$id/file", animated, 0, emojis)
+        files["v1/stickers/$id/file"] = bytes
+    }
+
+    fun addReplacement(id: String, bytes: ByteArray, replaces: String, animated: Boolean = false) {
+        stickers += RemoteSticker(id, "v1/stickers/$id/file", animated, 0, emptyList(), replaces)
         files["v1/stickers/$id/file"] = bytes
     }
 }
@@ -80,27 +86,19 @@ class SyncRepositoryTest {
         assertEquals(5, st.stickers.size)
         st.stickers.forEach {
             assertTrue(store.file(it.fileName).length() in 1..StickerProcessor.MAX_STATIC.toLong())
-            assertEquals(listOf("😀"), it.emojis) // default emoji
             assertTrue(it.isNew)
         }
-        val pack = store.packs("My TikTok Stickers").single()
-        assertTrue(pack.ready)
-        assertTrue(store.file(pack.trayFile).exists())
+        assertTrue(store.packs().isEmpty()) // no packs until the user makes one
         assertEquals("5", settings.currentSession().cursor)
     }
 
     @Test fun secondSyncOnlyFetchesWhatsNew() = runBlocking {
         repeat(3) { api.add("s$it", testPng()) }
         repo.sync()
-        val v1 = store.packs("My TikTok Stickers").single().version
         assertEquals(0, repo.sync().added)
-        assertEquals(v1, store.packs("My TikTok Stickers").single().version) // nothing changed, no refresh
-        api.add("s3", testPng(Color.GREEN), emojis = listOf("🔥"))
+        api.add("s3", testPng(Color.GREEN))
         assertEquals(1, repo.sync().added)
-        val pack = store.packs("My TikTok Stickers").single()
-        assertEquals(4, pack.stickers.size)
-        assertEquals(v1 + 1, pack.version) // WhatsApp will refresh the pack
-        assertEquals(listOf("🔥"), pack.stickers.last().emojis)
+        assertEquals(4, store.state.value.stickers.size)
     }
 
     @Test fun badFilesAreSkippedNotFatal() = runBlocking {
@@ -111,8 +109,7 @@ class SyncRepositoryTest {
         val r = repo.sync()
         assertEquals(2, r.added)
         assertEquals(2, r.skipped)
-        val packs = store.packs("P")
-        assertEquals(listOf(false, true), packs.map { it.animated })
+        assertEquals(listOf(false, true), store.state.value.stickers.sortedBy { it.animated }.map { it.animated })
     }
 
     @Test fun animatedStickersWhatsAppWouldRejectBecomeStillOnes() = runBlocking {
@@ -141,23 +138,38 @@ class SyncRepositoryTest {
         assertTrue(settings.currentSession().connected)
     }
 
-    @Test fun removeEmojisRenameAndOutlineAllRefreshPacks() = runBlocking {
+    @Test fun userPacksSplitByKindAndRefreshWhenChanged() = runBlocking {
         repeat(4) { api.add("s$it", testPng()) }
+        repeat(3) { api.add("a$it", StickerProcessorTest.animatedWebpHeader(512, 512), animated = true) }
         repo.sync()
-        var v = store.packs("My TikTok Stickers").single().version
 
-        repo.setEmojis("s0", listOf("😂", "😂", "🔥", "✨", "💯"))
-        assertEquals(listOf("😂", "🔥", "✨"), store.state.value.stickers.first { it.id == "s0" }.emojis)
-        assertEquals(++v, store.packs("My TikTok Stickers").single().version)
+        // One pick of still + animated = two packs (WhatsApp never mixes them), both named "Sticker Bridge · ...".
+        val ids = repo.createPack("Faves", listOf("s0", "s1", "s2", "a0", "a1", "a2"))
+        assertEquals(2, ids.size)
+        val packs = store.packs()
+        assertEquals(listOf("Sticker Bridge · Faves", "Sticker Bridge · Faves Animated"), packs.map { it.name })
+        assertEquals(listOf(false, true), packs.map { it.animated })
+        assertTrue(packs.all { it.ready && store.file(it.trayFile).exists() })
+        var v = packs[0].version
 
+        // Adding takes only the matching kind.
+        assertEquals(1, repo.addToPack(ids[0], listOf("s3", "a0")))
+        assertEquals(4, store.packs()[0].stickers.size)
+        assertEquals(++v, store.packs()[0].version)
+
+        // Removing a sticker from the app removes it from its packs too.
         repo.remove("s1")
         assertFalse(store.file("s1.webp").exists())
-        assertEquals(3, store.packs("My TikTok Stickers").single().stickers.size)
-        assertEquals(++v, store.packs("My TikTok Stickers").single().version)
+        assertEquals(listOf("s0", "s2", "s3"), store.packs()[0].stickers.map { it.id })
+        assertEquals(++v, store.packs()[0].version)
 
-        settings.update { it.copy(packName = "Faves") }
-        repo.renamePacks()
-        assertEquals("Faves", store.packs("Faves").single().name)
+        repo.renamePack(ids[0], "Best")
+        assertEquals("Sticker Bridge · Best", store.packs()[0].name)
+        repo.removeFromPack(ids[0], "s0")
+        assertFalse(store.packs()[0].ready)
+        repo.deletePack(ids[1])
+        assertEquals(1, store.packs().size)
+        assertEquals(6, store.state.value.stickers.size) // deleting a pack keeps its stickers
 
         val before = store.file("s2.webp").readBytes()
         settings.update { it.copy(outline = true) }
@@ -166,6 +178,38 @@ class SyncRepositoryTest {
 
         repo.markAllSeen()
         assertTrue(store.state.value.stickers.none { it.isNew })
+    }
+
+    @Test fun bigSelectionsSpillIntoMorePacks() = runBlocking {
+        repeat(32) { api.add("s$it", testPng()) }
+        while (repo.sync().added > 0) Unit // one sync reads at most 10 pages
+        val ids = repo.createPack("Lots", store.state.value.stickers.map { it.id })
+        assertEquals(2, ids.size)
+        assertEquals(listOf(30, 2), store.packs().map { it.stickers.size })
+        assertEquals("Sticker Bridge · Lots 2", store.packs()[1].name)
+    }
+
+    @Test fun remadeStickerReplacesTheOldOneEverywhere() = runBlocking {
+        repeat(3) { api.add("s$it", testPng()) }
+        repo.sync()
+        val pack = repo.createPack("P", listOf("s0", "s1", "s2")).single()
+        api.addReplacement("s1v2", testPng(Color.GREEN), replaces = "s1")
+        assertEquals(1, repo.sync().added)
+        assertEquals(listOf("s0", "s1v2", "s2"), store.state.value.stickers.map { it.id }.sorted())
+        assertEquals(listOf("s0", "s1v2", "s2"), store.packs().single { it.id == pack }.stickers.map { it.id })
+        assertFalse(store.file("s1.webp").exists())
+    }
+
+    @Test fun oldAutomaticPacksBecomeUserPacksWithTheSameIds() = runBlocking {
+        repeat(4) { api.add("s$it", testPng()) }
+        repo.sync()
+        store.update(false) { it.copy(packsMigrated = false) } // as if from an older version
+        repo.migratePacks()
+        val p = store.packs().single()
+        assertEquals("static-1", p.id) // same id = the pack already in WhatsApp keeps working
+        assertEquals("Sticker Bridge · My TikTok Stickers", p.name)
+        repo.migratePacks()
+        assertEquals(1, store.packs().size) // only once
     }
 
     @Test fun storeSurvivesRestart() = runBlocking {
@@ -190,6 +234,5 @@ class SyncRepositoryTest {
         assertEquals(0, demo.sync().added) // too soon for another
         t += DemoApi.NEW_EVERY_MS
         assertEquals(1, demo.sync().added)
-        assertTrue(store.packs("P").first().ready)
     }
 }

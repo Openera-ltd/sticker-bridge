@@ -48,6 +48,17 @@
             android:exported="true"
             android:readPermission="com.whatsapp.sticker.READ" />
 
+        <!-- Lets WhatsApp read one sticker file when the user sends it to a chat. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <receiver
             android:name=".update.InstallResultReceiver"
             android:exported="false" />

@@ -24,12 +24,17 @@ android {
         applicationId = "tech.openera.stickerbridge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "1.0.4"
+        versionCode = 6
+        versionName = "1.0.5"
 
         // The ONLY server the app talks to. Everything goes through it.
         buildConfigField("String", "API_BASE", "\"https://api.sticker.openera.tech/\"")
         buildConfigField("String", "BOT_USERNAME", "\"stickerbridge\"")
+        // Public half of the donation signing key. Donation details are shown only if signed by its private half.
+        buildConfigField("String", "DONATION_KEY", "\"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEbFMJKJzWEJoEcl9sqT2GbyIN63iPloiw1kdRKJ4//CHX8H3aRYTc/0gzCIOwjP+xTtoRFe8ENau0v/pRxeWMLw==\"")
+        // SHA-256 of the release signing certificate; empty means "don't check" (debug and tests).
+        buildConfigField("String", "SIGNER", "\"\"")
+        buildConfigField("String", "SOURCE_URL", "\"https://github.com/openera-ltd/sticker-bridge\"")
 
         // Sentry (crashes, freezes, performance). Project: manwah-lobby/sticker-bridge-android.
         manifestPlaceholders["sentryDsn"] =
@@ -74,6 +79,7 @@ android {
             signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
             // Only published builds report to Sentry; tests and debug builds stay silent.
             manifestPlaceholders["sentryEnabled"] = "true"
+            buildConfigField("String", "SIGNER", "\"4348d874674673d7e9f38a5c5522bde4a6a33f14cb4c0cf810ade8045876c81a\"")
         }
     }
 

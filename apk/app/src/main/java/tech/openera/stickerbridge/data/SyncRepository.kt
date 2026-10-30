@@ -90,7 +90,20 @@ class SyncRepository(
                             if (saved == null) {
                                 skipped.incrementAndGet()
                             } else {
-                                store.mutate(prefs.packName, prefs.outline) { list -> if (list.any { it.id == saved.id }) list else list + saved }
+                                val old = item.replaces?.let { r -> store.state.value.stickers.firstOrNull { it.id == r } }
+                                if (old != null) {
+                                    // A re-made sticker (e.g. now animated) takes the old one's place, in packs too.
+                                    store.update(prefs.outline) { st ->
+                                        st.copy(
+                                            stickers = st.stickers.map { if (it.id == old.id) saved.copy(addedAt = old.addedAt) else it },
+                                            packs = st.packs.map { pk -> pk.copy(stickerIds = pk.stickerIds.map { if (it == old.id) saved.id else it }) },
+                                        )
+                                    }
+                                    if (old.fileName != saved.fileName) store.file(old.fileName).delete()
+                                    store.file("orig_${old.id}").delete()
+                                } else {
+                                    store.mutate(prefs.outline) { list -> if (list.any { it.id == saved.id }) list else list + saved }
+                                }
                                 known += saved.id
                                 added.incrementAndGet()
                             }
@@ -98,7 +111,7 @@ class SyncRepository(
                     }
                 }
             }
-            if (todo.isNotEmpty()) refreshTrays(prefs.packName)
+            if (todo.isNotEmpty()) refreshTrays()
             val next = page.cursor
             val done = page.items.isEmpty() || next == null || next == cursor
             if (next != null) cursor = next
@@ -139,46 +152,66 @@ class SyncRepository(
                 store.file(s.fileName).writeBytes(StickerProcessor.toStaticSticker(orig.readBytes(), prefs.outline))
             }
         }
-        store.mutate(prefs.packName, prefs.outline) { it }
-        refreshTrays(prefs.packName)
+        store.mutate(prefs.outline) { it }
+        refreshTrays()
     }
 
     suspend fun remove(id: String) = withContext(Dispatchers.IO) {
         val prefs = settings.current()
         val s = store.state.value.stickers.firstOrNull { it.id == id } ?: return@withContext
-        store.mutate(prefs.packName, prefs.outline) { list -> list.filter { it.id != id } }
+        store.mutate(prefs.outline) { list -> list.filter { it.id != id } }
         store.file(s.fileName).delete()
         store.file("orig_$id").delete()
-        refreshTrays(prefs.packName)
-    }
-
-    suspend fun setEmojis(id: String, emojis: List<String>) {
-        val prefs = settings.current()
-        val clean = emojis.distinct().take(3).ifEmpty { listOf(prefs.defaultEmoji) }
-        store.mutate(prefs.packName, prefs.outline) { list ->
-            list.map { if (it.id == id) it.copy(emojis = clean) else it }
-        }
+        refreshTrays()
     }
 
     suspend fun markAllSeen() {
         val prefs = settings.current()
         if (store.state.value.stickers.none { it.isNew }) return
-        store.mutate(prefs.packName, prefs.outline) { list -> list.map { it.copy(isNew = false) } }
+        store.mutate(prefs.outline) { list -> list.map { it.copy(isNew = false) } }
     }
 
-    /** Pack name changed: versions go up so WhatsApp shows the new name. */
-    suspend fun renamePacks() {
+    // ---------- packs the user makes ----------
+
+    suspend fun createPack(name: String, stickerIds: List<String>): List<String> {
+        val ids = store.createPack(name, stickerIds, settings.current().outline)
+        refreshTrays()
+        return ids
+    }
+
+    suspend fun addToPack(packId: String, stickerIds: List<String>): Int =
+        store.addToPack(packId, stickerIds, settings.current().outline).also { refreshTrays() }
+
+    suspend fun removeFromPack(packId: String, stickerId: String) {
+        store.removeFromPack(packId, stickerId, settings.current().outline)
+        refreshTrays()
+    }
+
+    suspend fun renamePack(packId: String, name: String) {
+        store.renamePack(packId, name, settings.current().outline)
+    }
+
+    suspend fun deletePack(packId: String) {
+        store.deletePack(packId, settings.current().outline)
+        store.file("tray_$packId.png").delete()
+    }
+
+    /** One-time: the automatic packs from earlier versions become user packs (same ids, so WhatsApp keeps them). */
+    suspend fun migratePacks() {
+        if (store.state.value.packsMigrated) return
         val prefs = settings.current()
-        store.mutate(prefs.packName, prefs.outline) { it }
-        refreshTrays(prefs.packName)
+        store.migrateAutoPacks(prefs.packName, prefs.outline)
+        refreshTrays()
     }
 
-    suspend fun refreshTrays(baseName: String) = withContext(Dispatchers.IO) {
-        store.packs(baseName).forEach { p ->
-            val first = p.stickers.firstOrNull() ?: return@forEach
-            runCatching {
-                store.file(p.trayFile).writeBytes(StickerProcessor.tray(store.file(first.fileName).readBytes()))
-            }
+    suspend fun refreshTrays() = withContext(Dispatchers.IO) {
+        store.packs().forEach { p ->
+            if (p.stickers.isEmpty()) return@forEach
+            // WhatsApp needs a tray icon: use the first sticker that can be read, else a blank one.
+            val png = p.stickers.asSequence()
+                .mapNotNull { s -> runCatching { StickerProcessor.tray(store.file(s.fileName).readBytes()) }.getOrNull() }
+                .firstOrNull() ?: StickerProcessor.blankTray()
+            runCatching { store.file(p.trayFile).writeBytes(png) }
         }
     }
 

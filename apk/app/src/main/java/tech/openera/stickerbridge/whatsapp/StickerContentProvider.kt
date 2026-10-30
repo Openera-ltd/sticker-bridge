@@ -8,7 +8,6 @@ import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
 import android.os.ParcelFileDescriptor
-import kotlinx.coroutines.runBlocking
 import tech.openera.stickerbridge.Graph
 import tech.openera.stickerbridge.data.Pack
 import java.io.FileNotFoundException
@@ -33,9 +32,8 @@ class StickerContentProvider : ContentProvider() {
 
     private fun readyPacks(): List<Pack> {
         val g = Graph.get(context!!)
-        val name = runBlocking { g.settings.current().packName }
         g.store.reload()
-        return g.store.packs(name).filter { it.ready }
+        return g.store.packs().filter { it.ready }
     }
 
     override fun query(uri: Uri, projection: Array<String>?, selection: String?, args: Array<String>?, sort: String?): Cursor? =
