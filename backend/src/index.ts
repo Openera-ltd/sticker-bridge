@@ -11,6 +11,8 @@ export interface Env {
   BOT_SECRET: string;
   /** For publishing app updates and changing config. */
   ADMIN_SECRET: string;
+  /** The bot on Render; pinged so the free instance never sleeps. */
+  BOT_URL?: string;
 }
 
 const CODE_TTL_MS = 10 * 60_000;
@@ -18,6 +20,7 @@ const STICKER_TTL_MS = 30 * 24 * 60 * 60_000;
 const MAX_STICKER_BYTES = 5 * 1024 * 1024;
 const MAX_CODES_PER_HOUR = 6;
 const PAGE = 50;
+export const KEEP_AWAKE_CRON = "*/10 * * * *";
 const CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"; // no 0/O/1/I/L
 
 // ---------- small helpers ----------
@@ -323,6 +326,25 @@ export function isAnimated(b: Uint8Array): boolean {
   return false;
 }
 
+/** The bot keeps its TikTok login here, so a Render restart doesn't lose it. */
+async function botState(env: Env, req: Request): Promise<Response> {
+  if (!(await sameSecret(bearer(req) ?? "", env.BOT_SECRET))) return error(401, "Bot only");
+  const key = "bot/state.json";
+  if (req.method === "GET") {
+    const obj = await env.FILES.get(key);
+    return obj ? new Response(obj.body, { headers: { "content-type": "application/json" } }) : error(404, "No saved state");
+  }
+  const body = await req.text();
+  if (body.length > 200_000) return error(413, "Too large");
+  try {
+    JSON.parse(body);
+  } catch {
+    return error(400, "JSON body required");
+  }
+  await env.FILES.put(key, body, { httpMetadata: { contentType: "application/json" } });
+  return json({ ok: true });
+}
+
 // ---------- admin ----------
 
 async function publishRelease(env: Env, req: Request, code: string, url: URL): Promise<Response> {
@@ -392,6 +414,7 @@ export default {
         return r ? await apkFile(env, String(r.version_code)) : error(404, "No releases yet");
       }
       if (p === "/internal/inbox" && m === "POST") return await inbox(env, req);
+      if (p === "/internal/bot-state" && (m === "GET" || m === "PUT")) return await botState(env, req);
       r = p.match(/^\/admin\/releases\/(\d{1,9})$/);
       if (r && m === "PUT") return await publishRelease(env, req, r[1], url);
       if (p === "/admin/config" && m === "PUT") return await setConfig(env, req);
@@ -402,7 +425,12 @@ export default {
     }
   },
 
-  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(cleanup(env));
+  async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext) {
+    if (event.cron === KEEP_AWAKE_CRON) {
+      // Keeps the free Render instance from sleeping.
+      if (env.BOT_URL) ctx.waitUntil(fetch(env.BOT_URL.replace(/\/+$/, "") + "/healthz").then(() => {}, () => {}));
+    } else {
+      ctx.waitUntil(cleanup(env));
+    }
   },
 } satisfies ExportedHandler<Env>;

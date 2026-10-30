@@ -1,0 +1,23 @@
+# Render Blueprint for the @stickerbridge bot. The API, database and files are on Cloudflare (see backend/).
+services:
+  - type: web
+    name: sticker-bridge-bot
+    runtime: docker
+    plan: free
+    region: frankfurt
+    rootDir: backend/bot
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /healthz
+    envVars:
+      - key: API_BASE
+        value: https://api.sticker.openera.tech
+      - key: POLL_SECONDS
+        value: "60"
+      - key: MAX_CHATS
+        value: "10"
+      - key: SEND_REPLIES
+        value: "false"
+      - key: BOT_SECRET
+        sync: false
+      - key: TIKTOK_COOKIES
+        sync: false

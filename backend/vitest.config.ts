@@ -13,6 +13,6 @@ export default defineConfig(async () => {
         },
       }),
     ],
-    test: { setupFiles: ["./test/setup.ts"] },
+    test: { setupFiles: ["./test/setup.ts"], include: ["test/**/*.test.ts"] },
   };
 });

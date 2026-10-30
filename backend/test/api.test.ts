@@ -194,6 +194,18 @@ describe("app updates and config", () => {
   });
 });
 
+describe("bot login storage", () => {
+  it("saves and returns the bot's login, bot only", async () => {
+    const h = { authorization: "Bearer bot-secret" };
+    expect((await call("/internal/bot-state", { headers: h })).status).toBe(404);
+    expect((await call("/internal/bot-state", { method: "PUT", headers: h, body: "not json" })).status).toBe(400);
+    const state = { cookies: [{ name: "sessionid", value: "abc", domain: ".tiktok.com", path: "/" }] };
+    expect((await call("/internal/bot-state", { method: "PUT", headers: h, body: JSON.stringify(state) })).status).toBe(200);
+    expect(await (await call("/internal/bot-state", { headers: h })).json()).toEqual(state);
+    expect((await call("/internal/bot-state", { headers: { authorization: "Bearer admin-secret" } })).status).toBe(401);
+  });
+});
+
 describe("helpers", () => {
   it("finds codes however people type them", () => {
     expect(findCode("SB-7KQ4MZ")).toBe("SB-7KQ4MZ");

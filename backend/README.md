@@ -1,13 +1,15 @@
-# Sticker Bridge backend (Cloudflare)
+# Sticker Bridge backend
 
-Everything runs on Cloudflare, account `Admin@openera.tech`.
+The API, database and files run on Cloudflare (account `Admin@openera.tech`).
+The @stickerbridge bot runs on Render (free web service).
 
 | Part | Cloudflare product | Name |
 | --- | --- | --- |
 | API the app talks to | Worker + custom domain | `sticker-bridge-api` at `https://api.sticker.openera.tech` |
 | Database | D1 | `sticker-bridge` |
 | Sticker and APK files | R2 | `stiker-bridge` |
-| @stickerbridge bot | Worker + Browser Rendering | `sticker-bridge-bot` (every 30 min) |
+| @stickerbridge bot | **Render** web service (Docker, free) | `sticker-bridge-bot`, reads the inbox every 60 s |
+| Keep the bot awake | Cron on the API worker | pings the bot's `/healthz` every 10 min |
 | Clean-up (stickers older than 30 days) | Cron on the API worker | daily 03:17 UTC |
 
 API contract: [`API.md`](API.md). First-install download: `https://api.sticker.openera.tech/download`.
@@ -19,8 +21,9 @@ npm install
 export CLOUDFLARE_API_TOKEN=...  CLOUDFLARE_ACCOUNT_ID=f276304fe252aab8abb55d37c3e27092
 npm run migrate          # database tables
 npm run deploy           # API
-cd bot && npm install && npx wrangler deploy
 ```
+
+The bot deploys on Render from `backend/bot` (Dockerfile) whenever the branch is pushed.
 
 Secrets (already set; change with `npx wrangler secret put NAME`):
 
@@ -28,23 +31,24 @@ Secrets (already set; change with `npx wrangler secret put NAME`):
 | --- | --- | --- |
 | API | `BOT_SECRET` | The bot's key for `/internal/inbox` |
 | API | `ADMIN_SECRET` | For publishing updates and config |
-| bot | `BOT_SECRET` | Same value as the API's |
-| bot | `TIKTOK_COOKIES` | **Not set yet** — the @stickerbridge login (see below) |
+| bot (Render env) | `BOT_SECRET` | Same value as the API's |
+| bot (Render env) | `TIKTOK_COOKIES` | **Not set yet** — the @stickerbridge login (see below) |
 
 ## Connecting the bot to @stickerbridge
 
 1. On a computer, log into tiktok.com as @stickerbridge.
 2. Export the tiktok.com cookies (e.g. with a "cookie export" browser extension, as JSON).
-3. `cd bot && npx wrangler secret put TIKTOK_COOKIES` and paste them.
-4. Test: `curl -X POST https://sticker-bridge-bot.openera.workers.dev/run -H "authorization: Bearer $BOT_SECRET"`.
-   A good run reports `"loggedIn": true` and the chats it read.
+3. In Render → sticker-bridge-bot → Environment, set `TIKTOK_COOKIES` to them.
+   After the first good run the bot saves its login on Cloudflare (R2 `bot/state.json`),
+   so restarts keep working.
+4. Test: `curl -X POST https://sticker-bridge-bot.onrender.com/run -H "authorization: Bearer $BOT_SECRET"`.
+   A good run reports `"loggedIn": true` and the chats it read. `GET /healthz` shows the last run.
 
 TikTok's inbox page is undocumented; if the bot reports `loggedIn: false` while the cookies are valid,
-adjust the selectors in `bot/src/index.ts` → `readInbox()`. Replies in TikTok are off by default
-(`SEND_REPLIES` in `bot/wrangler.jsonc`).
+adjust the selectors in `bot/src/inbox.ts`. Replies in TikTok are off by default (`SEND_REPLIES=true` to turn on).
 
-Free-plan limit: 10 browser-minutes a day. One run takes about 20 s, so every 30 minutes fits.
-For sticker delivery within a minute or two, the Workers Paid plan ($5/month) is needed.
+Render free: 512 MB, the bot runs a slimmed-down Chromium and restarts it every 30 runs.
+Settings (Render env): `POLL_SECONDS` (default 60), `MAX_CHATS` (10), `SEND_REPLIES` (false).
 
 ## Publishing an app update
 
@@ -55,4 +59,5 @@ Phones see it within a day (or right away with "Check for updates").
 
 ## Tests
 
-`npm test` — API and bot logic, run against a local copy of Workers, D1 and R2.
+- `npm test` — the API, against a local copy of Workers, D1 and R2.
+- `cd bot && npm test` — the bot, including runs in a real Chromium against a fake TikTok inbox.

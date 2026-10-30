@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { imageKey, parseCookies, toInbox } from "./messages";
+import { imageKey, parseCookies, toInbox } from "./messages.ts";
 
 describe("turning inbox chats into API messages", () => {
   it("keeps only codes and images, with stable ids", async () => {
