@@ -57,6 +57,14 @@ export class Bot {
   private browser: Browser | null = null;
   private runs = 0;
   private running: Promise<RunReport> | null = null;
+  /** Runs and debug views share one browser, so they take turns. */
+  private queue: Promise<unknown> = Promise.resolve();
+
+  private exclusive<T>(fn: () => Promise<T>): Promise<T> {
+    const next = this.queue.then(fn, fn);
+    this.queue = next.catch(() => {});
+    return next;
+  }
   last: RunReport | null = null;
 
   private cfg: Config;
@@ -105,7 +113,11 @@ export class Bot {
   }
 
   /** What the bot sees on TikTok's inbox page: for adjusting selectors when TikTok changes its layout. */
-  async debug(): Promise<unknown> {
+  debug(): Promise<unknown> {
+    return this.exclusive(() => this.doDebug());
+  }
+
+  private async doDebug(): Promise<unknown> {
     const cookies = await this.loadCookies();
     if (!cookies.length) return { error: "No TikTok login yet" };
     const browser = await this.getBrowser();
@@ -140,7 +152,7 @@ export class Bot {
 
   /** One pass over the inbox. Never runs twice at the same time. */
   run(): Promise<RunReport> {
-    this.running ??= this.doRun().finally(() => (this.running = null));
+    this.running ??= this.exclusive(() => this.doRun()).finally(() => (this.running = null));
     return this.running;
   }
 
