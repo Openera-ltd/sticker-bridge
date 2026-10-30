@@ -47,8 +47,8 @@ export function configFromEnv(env = process.env): LiveConfig {
     requestsEveryMs: min(env.REQUESTS_EVERY_MIN, 2),
     staleAfterMs: min(env.STALE_AFTER_MIN, 20),
     restartEveryMs: min(env.RESTART_EVERY_MIN, 180),
-    memSoftMB: Number(env.MEM_SOFT_MB ?? 360),
-    memHardMB: Number(env.MEM_HARD_MB ?? 430),
+    memSoftMB: Number(env.MEM_SOFT_MB ?? 350),
+    memHardMB: Number(env.MEM_HARD_MB ?? 400),
   };
 }
 
@@ -326,7 +326,19 @@ export class LiveInbox {
     this.page = null;
     this.cdp = null;
     this.status = "stopped";
-    await b?.close().catch(() => {});
+    if (!b) return;
+    // Make sure every Chrome process is gone (a stuck one keeps its memory), then give the
+    // system a moment to hand that memory back before a new Chrome loads TikTok.
+    const proc = b.process();
+    await Promise.race([b.close().catch(() => {}), new Promise((r) => setTimeout(r, 10_000))]);
+    if (proc && proc.exitCode === null) {
+      try { process.kill(-proc.pid!, "SIGKILL"); } catch { proc.kill("SIGKILL"); }
+    }
+    for (let i = 0; i < 15; i++) {
+      const used = (await containerMemMB())?.usedMB;
+      if (used == null || used < 200) break;
+      await new Promise((r) => setTimeout(r, 2000));
+    }
   }
 
   /** What /healthz shows. */
