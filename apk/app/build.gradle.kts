@@ -7,7 +7,7 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
-// Release signing comes from android/keystore.properties (never committed) or env vars.
+// Release signing comes from apk/keystore.properties (never committed) or env vars.
 // Every update must be signed with the SAME key, or Android refuses to install it.
 val keystoreProps = Properties().apply {
     val f = rootProject.file("keystore.properties")

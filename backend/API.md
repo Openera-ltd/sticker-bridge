@@ -70,7 +70,7 @@ from this same domain, checks `sha256` and that the APK is signed with the same 
 The APK file (`application/vnd.android.package-archive`).
 
 ## Publishing an update
-1. Raise `versionCode` and `versionName` in `android/app/build.gradle.kts`.
+1. Raise `versionCode` and `versionName` in `apk/app/build.gradle.kts`.
 2. Build: `./gradlew assembleLiveRelease` (signed with the release key).
 3. Upload the APK so `v1/app/apk/<versionCode>` serves it.
 4. Point `v1/app/latest` at it with the APK's SHA-256 (`sha256sum app-live-release.apk`).

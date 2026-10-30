@@ -38,4 +38,4 @@ keyPassword=...
 - `update/` — in-app updates: download from the API, check SHA-256 and signing key, install.
 - `ui/` — Jetpack Compose screens: welcome, connect, stickers, packs, settings.
 
-Server contract: [`../docs/api.md`](../docs/api.md).
+Server contract: [`../backend/API.md`](../backend/API.md).

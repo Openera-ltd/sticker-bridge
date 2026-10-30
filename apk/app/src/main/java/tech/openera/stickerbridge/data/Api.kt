@@ -4,7 +4,7 @@ import kotlinx.serialization.Serializable
 
 /**
  * Everything the app asks the server. One base address, versioned under /v1.
- * See docs/api.md for the server side of this contract.
+ * See backend/API.md for the server side of this contract.
  */
 interface StickerApi {
     /** Ask for a one-time code to send to @stickerbridge on TikTok. */
