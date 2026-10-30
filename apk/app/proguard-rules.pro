@@ -32,7 +32,8 @@
 -repackageclasses 'o'
 -allowaccessmodification
 -keepattributes LineNumberTable
--renamesourcefileattribute s
+# Don't use -renamesourcefileattribute: with Kotlin coroutines it produced an invalid dex
+# (out-of-order annotation values) that Android refused to load (1.0.5 and 1.0.6).
 
 # No logging in release builds.
 -assumenosideeffects class android.util.Log {
