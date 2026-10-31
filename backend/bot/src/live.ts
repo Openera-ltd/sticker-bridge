@@ -187,6 +187,7 @@ export class LiveInbox {
     if (!drawn) this.log("chat list still drawing, but message data is flowing: live");
     if (await this.loggedOut()) return;
     this.status = "live";
+    this.lastError = null;
     this.lastDataAt = Date.now();
     this.log(`live after ${Math.round((Date.now() - this.startedAt) / 1000)}s`);
 
