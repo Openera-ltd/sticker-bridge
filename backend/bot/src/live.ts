@@ -47,8 +47,8 @@ export function configFromEnv(env = process.env): LiveConfig {
     requestsEveryMs: min(env.REQUESTS_EVERY_MIN, 2),
     staleAfterMs: min(env.STALE_AFTER_MIN, 20),
     restartEveryMs: min(env.RESTART_EVERY_MIN, 180),
-    memSoftMB: Number(env.MEM_SOFT_MB ?? 350),
-    memHardMB: Number(env.MEM_HARD_MB ?? 400),
+    memSoftMB: Number(env.MEM_SOFT_MB ?? 340),
+    memHardMB: Number(env.MEM_HARD_MB ?? 430),
   };
 }
 
@@ -278,8 +278,8 @@ export class LiveInbox {
       this.counts.memRestarts++;
       return void this.restart(`memory ${used} MB`);
     }
-    // At most every 3 minutes: freeing memory costs CPU, and the box only has 0.1 of one.
-    if (used >= this.cfg.memSoftMB && this.cdp && Date.now() - this.lastTrimAt > 180_000) {
+    // At most every 2 minutes: freeing memory costs CPU, and the box only has 0.1 of one.
+    if (used >= this.cfg.memSoftMB && this.cdp && Date.now() - this.lastTrimAt > 120_000) {
       this.trimming = true;
       this.lastTrimAt = Date.now();
       try {
