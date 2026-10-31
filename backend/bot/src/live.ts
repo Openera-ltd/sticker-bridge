@@ -288,6 +288,14 @@ export class LiveInbox {
     const mem = await containerMemMB();
     const used = mem?.usedMB ?? null;
     this.memMB = used;
+    // The bot's own (Node) memory: if it nears its limit, start a fresh process cleanly instead of
+    // crashing mid-work. Render starts it again in about a minute.
+    const heap = (await import("node:v8")).getHeapStatistics();
+    if (heap.used_heap_size > heap.heap_size_limit * 0.85) {
+      this.log(`bot memory ${Math.round(heap.used_heap_size / 1e6)} of ${Math.round(heap.heap_size_limit / 1e6)} MB: starting fresh`);
+      await this.stop().catch(() => {});
+      process.exit(1);
+    }
     if (used == null || this.trimming) return;
     this.memPeakMB = Math.max(this.memPeakMB, used);
     if (used >= this.cfg.memHardMB && this.status === "live") {
@@ -370,6 +378,7 @@ export class LiveInbox {
       results: this.results,
       lastError: this.lastError,
       nodeMemMB: Math.round(mem.rss / 1e6),
+      nodeHeapMB: Math.round(mem.heapUsed / 1e6),
       memMB: this.memMB,
       memPeakMB: this.memPeakMB,
     };

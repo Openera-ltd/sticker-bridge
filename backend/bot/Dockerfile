@@ -17,4 +17,4 @@ ENV NODE_ENV=production PORT=10000 CHROME_PATH=/usr/local/bin/chrome-headless-sh
 COPY src ./src
 USER node
 EXPOSE 10000
-CMD ["node", "--experimental-strip-types", "--no-warnings", "--max-old-space-size=96", "src/live.ts"]
+CMD ["node", "--experimental-strip-types", "--no-warnings", "--max-old-space-size=160", "src/live.ts"]
