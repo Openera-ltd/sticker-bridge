@@ -140,7 +140,9 @@ async function stickersList(env: Env, req: Request, url: URL): Promise<Response>
     ...(r.replaces ? { replaces: r.replaces } : {}),
   }));
   const cursor = results.length ? String(results[results.length - 1].seq) : String(since);
-  return json({ items, cursor });
+  // The current TikTok username, so the app can show it if it changed or was looked up later.
+  const acc = await env.DB.prepare("SELECT username FROM accounts WHERE id = ?").bind(d.accountId).first<{ username: string }>();
+  return json({ items, cursor, username: acc?.username ?? null });
 }
 
 async function stickerFile(env: Env, req: Request, id: string): Promise<Response> {
@@ -235,17 +237,49 @@ export interface InboxMessage {
   animated?: boolean;
 }
 
+/** "u_123…", the bare id, or nothing: the bot didn't know the person's TikTok username. */
+export function isPlaceholderName(name: string, id: string): boolean {
+  return !name || name === id || /^u_\d+$/.test(name);
+}
+
+/**
+ * Turns a TikTok user id into the @username, using TikTok's public share link, which redirects
+ * /share/user/<id> to /@<username>. No login needed. Returns null if TikTok doesn't answer.
+ */
+export async function usernameFromId(id: string, fetcher: typeof fetch = fetch): Promise<string | null> {
+  if (!/^\d{5,25}$/.test(id)) return null;
+  try {
+    const res = await fetcher(`https://www.tiktok.com/share/user/${id}`, {
+      redirect: "manual",
+      headers: { "user-agent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/140 Mobile Safari/537.36" },
+      signal: AbortSignal.timeout(5000),
+    });
+    const m = (res.headers.get("location") ?? "").match(/\/@([A-Za-z0-9._]{2,24})(?:[/?]|$)/);
+    return m ? m[1] : null;
+  } catch {
+    return null;
+  }
+}
+
 async function inbox(env: Env, req: Request): Promise<Response> {
   if (!(await sameSecret(bearer(req) ?? "", env.BOT_SECRET))) return error(401, "Bot only");
   const m = await req.json<InboxMessage>().catch(() => null);
   const senderId = cleanId(m?.sender?.id ?? "");
   if (!m || !m.messageId || !senderId) return error(400, "Bad message");
-  const username = (m.sender.username ?? "").replace(/^@/, "").slice(0, 64) || senderId;
+  let username = (m.sender.username ?? "").replace(/^@/, "").slice(0, 64);
   const now = Date.now();
 
   const seen = await env.DB.prepare("INSERT OR IGNORE INTO processed (message_id, created_at) VALUES (?, ?)")
     .bind(m.messageId.slice(0, 128), now).run();
   if (seen.meta.changes === 0) return json({ action: "duplicate" });
+
+  // The bot doesn't always see usernames, only user ids. Keep a known username, else look it up once.
+  if (isPlaceholderName(username, senderId)) {
+    const known = await env.DB.prepare("SELECT username FROM accounts WHERE id = ?").bind(senderId).first<{ username: string }>();
+    username = known && !isPlaceholderName(known.username, senderId)
+      ? known.username
+      : (await usernameFromId(senderId)) ?? (username || senderId);
+  }
 
   await env.DB.prepare(
     "INSERT INTO accounts (id, username, created_at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET username = excluded.username",
@@ -554,6 +588,19 @@ export default {
       if (r && m === "PUT") return await publishRelease(env, req, r[1], url);
       if (p === "/admin/config" && m === "PUT") return await setConfig(env, req);
       if (p === "/admin/reconvert" && m === "POST") return await reconvert(env, req);
+      if (p === "/admin/fix-usernames" && m === "POST") {
+        if (!(await sameSecret(bearer(req) ?? "", env.ADMIN_SECRET))) return error(401, "Admin only");
+        const rows = (await env.DB.prepare("SELECT id, username FROM accounts").all<{ id: string; username: string }>()).results;
+        const fixed: Record<string, string> = {};
+        for (const r of rows.filter((r) => isPlaceholderName(r.username, r.id)).slice(0, 40)) {
+          const name = await usernameFromId(r.id);
+          if (name) {
+            await env.DB.prepare("UPDATE accounts SET username = ? WHERE id = ?").bind(name, r.id).run();
+            fixed[r.id] = name;
+          }
+        }
+        return json({ fixed });
+      }
       if (p === "/admin/donation" && m === "PUT") {
         if (!(await sameSecret(bearer(req) ?? "", env.ADMIN_SECRET))) return error(401, "Admin only");
         const b = await req.json<{ payload?: string; signature?: string }>().catch(() => null);

@@ -144,6 +144,10 @@ class SettingsRepo(private val context: Context) {
         }
     }
 
+    suspend fun saveUsername(username: String) {
+        context.store.edit { if (it[K.token] != null) it[K.username] = username }
+    }
+
     suspend fun saveSync(cursor: String?, at: Long) {
         context.store.edit {
             if (cursor != null) it[K.cursor] = cursor

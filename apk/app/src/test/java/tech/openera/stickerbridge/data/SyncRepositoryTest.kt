@@ -22,6 +22,7 @@ class FakeApi(var stickers: MutableList<RemoteSticker> = mutableListOf()) : Stic
     val files = mutableMapOf<String, ByteArray>()
     var failWith: Exception? = null
     var calls = 0
+    var username: String? = null
 
     override suspend fun startLink(installId: String) = LinkStart("SB-1", "p", Long.MAX_VALUE)
     override suspend fun linkStatus(code: String, pollToken: String) = LinkStatus("pending")
@@ -30,7 +31,7 @@ class FakeApi(var stickers: MutableList<RemoteSticker> = mutableListOf()) : Stic
         failWith?.let { throw it }
         val from = cursor?.toInt() ?: 0
         val page = stickers.drop(from).take(2)
-        return StickerPage(page, (from + page.size).toString())
+        return StickerPage(page, (from + page.size).toString(), username)
     }
     override suspend fun download(token: String?, path: String) = files[path] ?: error("missing $path")
     override suspend fun downloadTo(path: String, dest: File, onProgress: (Long, Long) -> Unit) = Unit
@@ -210,6 +211,13 @@ class SyncRepositoryTest {
         assertEquals("Sticker Bridge · My TikTok Stickers", p.name)
         repo.migratePacks()
         assertEquals(1, store.packs().size) // only once
+    }
+
+    @Test fun usernameFoundLaterReplacesTheIdShownAtConnect() = runBlocking {
+        settings.saveLink("tok", Account("7579924027591345174", "u_7579924027591345174"))
+        api.username = "togata_ps5"
+        repo.sync()
+        assertEquals("togata_ps5", settings.currentSession().username)
     }
 
     @Test fun storeSurvivesRestart() = runBlocking {

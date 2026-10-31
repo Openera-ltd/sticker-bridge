@@ -75,6 +75,7 @@ class SyncRepository(
         var pages = 0
         while (pages++ < MAX_PAGES) {
             val page = api.stickers(token, cursor)
+            if (pages == 1) page.username?.takeIf { it.isNotBlank() && it != session.username }?.let { settings.saveUsername(it) }
             val todo = page.items.distinctBy { it.id }.filter { it.id !in known }
             // A few at a time, and each sticker shows up the moment it's ready (not after the whole batch).
             kotlinx.coroutines.coroutineScope {

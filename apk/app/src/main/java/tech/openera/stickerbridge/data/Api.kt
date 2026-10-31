@@ -63,6 +63,8 @@ data class Account(
 data class StickerPage(
     val items: List<RemoteSticker>,
     val cursor: String? = null,
+    /** The account's current TikTok username. */
+    val username: String? = null,
 )
 
 @Serializable

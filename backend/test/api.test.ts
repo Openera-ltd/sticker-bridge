@@ -272,3 +272,19 @@ describe("helpers", () => {
     expect(sniffType(new TextEncoder().encode("hello"))).toBeNull();
   });
 });
+
+describe("usernames from user ids", () => {
+  it("reads the @username from TikTok's share redirect", async () => {
+    const { usernameFromId, isPlaceholderName } = await import("../src/index");
+    const fake = (async (u: string) => {
+      expect(u).toBe("https://www.tiktok.com/share/user/7579924027591345174");
+      return new Response(null, { status: 301, headers: { location: "https://www.tiktok.com/@togata_ps5?_r=1" } });
+    }) as unknown as typeof fetch;
+    expect(await usernameFromId("7579924027591345174", fake)).toBe("togata_ps5");
+    expect(await usernameFromId("not-an-id", fake)).toBeNull();
+    const down = (async () => { throw new Error("offline"); }) as unknown as typeof fetch;
+    expect(await usernameFromId("7579924027591345174", down)).toBeNull();
+    expect(isPlaceholderName("u_7579924027591345174", "7579924027591345174")).toBe(true);
+    expect(isPlaceholderName("togata_ps5", "7579924027591345174")).toBe(false);
+  });
+});
