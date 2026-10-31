@@ -414,11 +414,14 @@ async function botState(env: Env, req: Request): Promise<Response> {
   }
   const body = await req.text();
   if (body.length > 200_000) return error(413, "Too large");
+  let parsed: { cookies?: { name?: string; value?: string }[] };
   try {
-    JSON.parse(body);
+    parsed = JSON.parse(body);
   } catch {
     return error(400, "JSON body required");
   }
+  // Never replace a working login with a logged-out one (no TikTok session cookie).
+  if (!parsed.cookies?.some((c) => c.name === "sessionid" && c.value)) return error(422, "No TikTok session in these cookies");
   await env.DB.prepare("INSERT OR REPLACE INTO bot_state (id, value, updated_at) VALUES (1, ?, ?)").bind(body, Date.now()).run();
   return json({ ok: true });
 }

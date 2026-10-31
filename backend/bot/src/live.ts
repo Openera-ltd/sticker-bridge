@@ -75,7 +75,7 @@ const BLOCKED_HOSTS = [
   /google/, /facebook/, /(^|\.)log[a-z0-9-]*\.tiktok/, /\.ttwstatic\.com\/.*(live|shop)/i, /tiktokcdn[^/]*\/.*\.(mp4|m3u8|webm)/,
 ];
 
-export type Status = "starting" | "loading" | "live" | "restarting" | "stopped" | "no-login";
+export type Status = "starting" | "loading" | "live" | "restarting" | "stopped" | "no-login" | "logged-out";
 
 export class LiveInbox {
   status: Status = "starting";
@@ -185,6 +185,7 @@ export class LiveInbox {
     const drawn = await page.waitForSelector(ROW_SELECTOR, { timeout: this.cfg.loadTimeoutMs }).then(() => true, () => false);
     if (!drawn && this.counts.frames + this.counts.responses === 0) throw new Error("inbox didn't load and no message data arrived");
     if (!drawn) this.log("chat list still drawing, but message data is flowing: live");
+    if (await this.loggedOut()) return;
     this.status = "live";
     this.lastDataAt = Date.now();
     this.log(`live after ${Math.round((Date.now() - this.startedAt) / 1000)}s`);
@@ -259,6 +260,7 @@ export class LiveInbox {
         await this.saveLogin();
       }
       await dismissCookieBanner(this.page);
+      if (await this.loggedOut()) return;
       // Requests can only be accepted once the chat list has drawn.
       if (!(await this.page.$(ROW_SELECTOR))) return;
       const accepted = await acceptRequests(this.page, this.cfg.inboxUrl, 10, { inPlace: true }).catch(() => 0);
@@ -277,6 +279,24 @@ export class LiveInbox {
     } finally {
       this.busy = false;
     }
+  }
+
+  /**
+   * TikTok signed the bot out (login page, or no session cookie). Stop pretending to be live:
+   * report it, keep the saved login untouched, and try the saved login again every 30 minutes.
+   */
+  private async loggedOut(): Promise<boolean> {
+    const page = this.page;
+    if (!page) return false;
+    const url = page.url();
+    const cookies = await this.browser?.cookies().catch(() => null);
+    const noSession = cookies != null && !cookies.some((c) => c.name === "sessionid" && c.value);
+    if (!/\/login/.test(url) && !noSession) return false;
+    this.status = "logged-out";
+    this.lastError = "TikTok signed the bot out: it needs a fresh login";
+    this.log("logged out of TikTok:", url);
+    setTimeout(() => { if (this.status === "logged-out") void this.restart("retry saved login"); }, 30 * 60_000);
+    return true;
   }
 
   /** Every 10 s: keep Chrome well under Render's memory limit. */
@@ -320,7 +340,8 @@ export class LiveInbox {
 
   private async saveLogin() {
     const fresh = await this.browser?.cookies().catch(() => []);
-    if (fresh?.length) await this.api("/internal/bot-state", { method: "PUT", body: JSON.stringify({ cookies: fresh }) }).catch(() => {});
+    // Only save a working login: a logged-out browser must not overwrite the saved one.
+    if (fresh?.some((c) => c.name === "sessionid" && c.value)) await this.api("/internal/bot-state", { method: "PUT", body: JSON.stringify({ cookies: fresh }) }).catch(() => {});
   }
 
   private failing = false;

@@ -202,6 +202,10 @@ describe("bot login storage", () => {
     const state = { cookies: [{ name: "sessionid", value: "abc", domain: ".tiktok.com", path: "/" }] };
     expect((await call("/internal/bot-state", { method: "PUT", headers: h, body: JSON.stringify(state) })).status).toBe(200);
     expect(await (await call("/internal/bot-state", { headers: h })).json()).toEqual(state);
+    // A logged-out browser's cookies never replace the working login.
+    const loggedOut = { cookies: [{ name: "msToken", value: "x", domain: ".tiktok.com", path: "/" }] };
+    expect((await call("/internal/bot-state", { method: "PUT", headers: h, body: JSON.stringify(loggedOut) })).status).toBe(422);
+    expect(await (await call("/internal/bot-state", { headers: h })).json()).toEqual(state);
     expect((await call("/internal/bot-state", { headers: { authorization: "Bearer admin-secret" } })).status).toBe(401);
   });
 });
