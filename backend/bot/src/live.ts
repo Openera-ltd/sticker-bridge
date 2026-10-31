@@ -90,6 +90,15 @@ export class LiveInbox {
   private botId: string | undefined;
   private queue: Promise<void> = Promise.resolve();
   private timers: ReturnType<typeof setInterval>[] = [];
+  /** Recent request summaries for /debug: what was blocked, what failed, what TikTok fetched. */
+  blocked: string[] = [];
+  failed: string[] = [];
+  calls: string[] = [];
+  private note(list: string[], line: string) {
+    if (list[0] === line) return;
+    list.unshift(line);
+    if (list.length > 40) list.length = 40;
+  }
   private browserStartedAt = 0;
   private busy = false;
   private cfg: LiveConfig;
@@ -137,12 +146,16 @@ export class LiveInbox {
       const url = req.url();
       let host = "";
       try { host = new URL(url).hostname; } catch { /* data: urls */ }
+      const short = `${req.resourceType()} ${host}${(() => { try { return new URL(url).pathname.slice(0, 60); } catch { return ""; } })()}`;
       if (BLOCKED_TYPES.has(req.resourceType()) || BLOCKED_HOSTS.some((re) => re.test(host) || re.test(url))) {
+        this.note(this.blocked, short);
         req.abort().catch(() => {});
       } else {
+        if (req.resourceType() === "fetch" || req.resourceType() === "xhr" || req.resourceType() === "websocket") this.note(this.calls, short);
         req.continue().catch(() => {});
       }
     });
+    page.on("requestfailed", (req) => this.note(this.failed, `${req.resourceType()} ${req.url().slice(0, 100)} ${req.failure()?.errorText ?? ""}`));
     page.on("response", (res) => void this.onResponse(res.url(), res).catch(() => {}));
     page.on("error", (e) => this.fail(`page crashed: ${e.message}`));
 
@@ -243,6 +256,7 @@ export class LiveInbox {
         this.lastDataAt = Date.now();
         await this.saveLogin();
       }
+      await dismissCookieBanner(this.page);
       // Requests can only be accepted once the chat list has drawn.
       if (!(await this.page.$(ROW_SELECTOR))) return;
       const accepted = await acceptRequests(this.page, this.cfg.inboxUrl, 10, { inPlace: true }).catch(() => 0);
@@ -378,6 +392,14 @@ export async function containerMemMB(): Promise<{ totalMB: number; usedMB: numbe
   return { totalMB: Math.round(Number(total) / 1e6), usedMB: Number.isFinite(used) ? Math.round(used / 1e6) : null };
 }
 
+/** TikTok's cookie banner covers half the page; decline the optional cookies once. */
+async function dismissCookieBanner(page: Page) {
+  await page.evaluate(() => {
+    const b = [...document.querySelectorAll("button")].find((x) => /^decline optional cookies$/i.test(x.innerText.trim()));
+    b?.click();
+  }).catch(() => {});
+}
+
 export function startServer(bot: LiveInbox, cfg: LiveConfig, port: number) {
   const authed = (h: string | undefined) => Boolean(cfg.botSecret) && h === `Bearer ${cfg.botSecret}`;
   return createServer(async (req, res) => {
@@ -389,7 +411,7 @@ export function startServer(bot: LiveInbox, cfg: LiveConfig, port: number) {
     if (url.pathname === "/healthz") return send(200, { ...bot.health(), containerMemMB: await containerMemMB() });
     if (!authed(req.headers.authorization)) return send(404, { error: "Not found" });
     if (url.pathname === "/debug") {
-      return send(200, { ...bot.health(), recent: bot.recent, screenshot: url.searchParams.has("shot") ? await bot.screenshot() : undefined });
+      return send(200, { ...bot.health(), recent: bot.recent, blocked: bot.blocked, failed: bot.failed, calls: bot.calls, screenshot: url.searchParams.has("shot") ? await bot.screenshot() : undefined });
     }
     if (url.pathname === "/restart" && req.method === "POST") {
       void bot.restart("requested");
