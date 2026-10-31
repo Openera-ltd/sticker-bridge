@@ -428,8 +428,13 @@ export async function containerMemMB(): Promise<{ totalMB: number; usedMB: numbe
 /** TikTok's cookie banner covers half the page; decline the optional cookies once. */
 async function dismissCookieBanner(page: Page) {
   await page.evaluate(() => {
-    const b = [...document.querySelectorAll("button")].find((x) => /^decline optional cookies$/i.test(x.innerText.trim()));
-    b?.click();
+    // The banner lives inside a shadow root (<tiktok-cookie-banner>), so search those too.
+    const roots: (Document | ShadowRoot)[] = [document];
+    for (const el of document.querySelectorAll("*")) if (el.shadowRoot) roots.push(el.shadowRoot);
+    for (const r of roots) {
+      const b = [...r.querySelectorAll("button")].find((x) => /^decline optional cookies$/i.test((x.textContent ?? "").trim()));
+      if (b) return void b.click();
+    }
   }).catch(() => {});
 }
 
