@@ -67,7 +67,9 @@ const CHROME_ARGS = [
 
 /** Things the messages tab never needs. Blocking them saves most of the CPU and memory. */
 // Stylesheets stay allowed: TikTok loads its Messages code only after its style files.
-const BLOCKED_TYPES = new Set(["image", "media", "font", "texttrack", "eventsource", "manifest", "other"]);
+// "other" stays allowed too: TikTok's chat list is loaded by a background worker script of that
+// type. Blocking it left the list empty forever, so message requests were never accepted.
+const BLOCKED_TYPES = new Set(["image", "media", "font", "texttrack", "manifest"]);
 const BLOCKED_HOSTS = [
   /(^|\.)webcast\./, /(^|\.)mon[a-z0-9-]*\.tiktokv/, /(^|\.)mcs[a-z0-9-]*\.tiktok/, /analytics/, /doubleclick/,
   /google/, /facebook/, /(^|\.)log[a-z0-9-]*\.tiktok/, /\.ttwstatic\.com\/.*(live|shop)/i, /tiktokcdn[^/]*\/.*\.(mp4|m3u8|webm)/,
