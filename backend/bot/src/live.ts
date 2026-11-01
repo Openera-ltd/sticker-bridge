@@ -92,6 +92,10 @@ export class LiveInbox {
   private botId: string | undefined;
   private queue: Promise<void> = Promise.resolve();
   private timers: ReturnType<typeof setInterval>[] = [];
+  /** True once a login exists in the API (set on start if one was loaded from there). */
+  private loginSaved = false;
+  /** Set while a restart runs, so two can't overlap. */
+  private restarting = false;
   /** Recent request summaries for /debug: what was blocked, what failed, what TikTok fetched. */
   blocked: string[] = [];
   failed: string[] = [];
@@ -125,6 +129,7 @@ export class LiveInbox {
   async start(): Promise<void> {
     this.status = "loading";
     const cookies = await loadCookies(this.api, this.cfg.initialCookies);
+    this.loginSaved ||= await this.api("/internal/bot-state").then((r) => r.ok, () => false);
     if (!cookies.length) {
       this.status = "no-login";
       this.log("no TikTok login yet (set TIKTOK_COOKIES)");
@@ -319,7 +324,8 @@ export class LiveInbox {
     }
     if (used == null || this.trimming) return;
     this.memPeakMB = Math.max(this.memPeakMB, used);
-    if (used >= this.cfg.memHardMB && this.status === "live") {
+    // Not in the middle of accepting requests: that left the page half-navigated and caused a second restart.
+    if (used >= this.cfg.memHardMB && this.status === "live" && !this.busy) {
       this.counts.memRestarts++;
       return void this.restart(`memory ${used} MB`);
     }
@@ -340,8 +346,13 @@ export class LiveInbox {
   }
 
   private async saveLogin() {
+    // The saved login is the one exported from a real browser, and it stays as it is. The bot's own
+    // copy of the cookies went bad twice (TikTok then treated it as logged out), while the exported
+    // login kept working. So only save when nothing is saved yet (first start from TIKTOK_COOKIES).
+    if (this.loginSaved) return;
     const fresh = await this.browser?.cookies().catch(() => []);
     // Only save a working login: a logged-out browser must not overwrite the saved one.
+    this.loginSaved = true;
     if (fresh?.some((c) => c.name === "sessionid" && c.value)) await this.api("/internal/bot-state", { method: "PUT", body: JSON.stringify({ cookies: fresh }) }).catch(() => {});
   }
 
@@ -355,6 +366,17 @@ export class LiveInbox {
   }
 
   async restart(reason: string) {
+    // One at a time: overlapping restarts ran two TikTok loads at once.
+    if (this.restarting) return void this.log("restart skipped (one already running):", reason);
+    this.restarting = true;
+    try {
+      await this.restartNow(reason);
+    } finally {
+      this.restarting = false;
+    }
+  }
+
+  private async restartNow(reason: string) {
     this.log("restarting:", reason);
     this.status = "restarting";
     this.counts.restarts++;
